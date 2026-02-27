@@ -7,13 +7,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class ArtifactResponse(BaseModel):
     artifact_id: str = Field(...)
-    job_id: str = Field(...)
-    artifact_kind: str = Field(...)
-    media_type: str = Field(...)
     byte_size: int = Field(...)
     content_sha256: Optional[str] = Field(default=None)
-    storage_key: str = Field(...)
+    job_id: str = Field(...)
+    kind: str = Field(...)
     manifest: Optional[Dict[str, Any]] = Field(default=None)
+    media_type: str = Field(...)
+    storage_key: str = Field(...)
 
     model_config = ConfigDict(extra="forbid")
 

@@ -2,9 +2,10 @@ import pytest
 from pydantic import ValidationError
 
 from domain import (
-    Document,
-    Job,
-    Artifact,
+    DocumentRecord as Document,
+    JobRecord as Job,
+    JobStatus,
+    ArtifactRecord as Artifact,
 )
 
 

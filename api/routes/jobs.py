@@ -1,41 +1,36 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
-from api.schemas.job_schemas import JobResponse, JobRunRequest
-from services.job_service import JobService
-from storage.adapter import StorageError
+from core.errors import ErrorCode
+from core.ordering import sort_dict
+from domain.job import JobStatus
 
-
-router = APIRouter(prefix="/jobs", tags=["jobs"])
-
-
-def _as_http_error(status_code: int, message: str, details: Optional[Dict[str, Any]] = None) -> HTTPException:
-    payload: Dict[str, Any] = {"message": message}
-    if details is not None:
-        payload["details"] = details
-    return HTTPException(status_code=status_code, detail=payload)
+router = APIRouter()
 
 
-@router.post("/run", response_model=JobResponse)
-def run_job(req: JobRunRequest) -> JobResponse:
-    svc: JobService = router.state.job_service
+@router.post("/jobs/execute")
+def execute_job(request: Request, payload: Dict[str, Any]):
+    job_service = request.app.state.job_service
 
-    try:
-        job = svc.run_job(
-            job_type=req.job_type,
-            input_ref=dict(req.input_ref),
-            params=dict(req.params),
-            required_capability=req.required_capability,
-            provider_preference=list(req.provider_preference) if req.provider_preference is not None else None,
-        )
-    except ValueError as e:
-        raise _as_http_error(400, str(e))
-    except StorageError as e:
-        raise _as_http_error(500, "storage error", e.failure.to_dict())
-    except Exception as e:
-        raise _as_http_error(500, "internal error", {"error": str(e)})
+    operation = payload.get("operation")
+    input_ref = payload.get("input_ref", {})
+    params = payload.get("params", {})
 
-    return JobResponse.from_domain(job)
+    record = job_service.execute(
+        operation=operation,
+        input_ref=input_ref,
+        params=params,
+    )
+
+    if record.status in (JobStatus.FAILED, JobStatus.BLOCKED):
+        failure_payload = record.failure or {
+            "code": ErrorCode.INTERNAL_ERROR.value,
+            "message": "execution failed",
+            "details": None,
+        }
+        raise HTTPException(status_code=400, detail=sort_dict(failure_payload))
+
+    return sort_dict(record.to_dict())

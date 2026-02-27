@@ -1,10 +1,10 @@
+from .artifact import ArtifactRecord
 from .document import DocumentRecord
 from .job import JobRecord, JobStatus
-from .artifact import ArtifactRecord
 
 __all__ = [
+    "ArtifactRecord",
     "DocumentRecord",
     "JobRecord",
     "JobStatus",
-    "ArtifactRecord",
 ]

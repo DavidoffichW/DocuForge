@@ -1,28 +1,41 @@
- 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 
 class DocumentRecord(BaseModel):
-    document_id: str = Field(...)
-    content_sha256: str = Field(...)
-    filename: str = Field(...)
-    media_type: str = Field(...)
-    byte_size: int = Field(...)
-    ingest_index: int = Field(...)
-    storage_key: str = Field(...)
-    id_strategy: str = Field(...)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    document_id: str
+    content_sha256: str
+    storage_key: str
+    byte_size: int = 0
+    filename: str = ""
+    media_type: str = "application/octet-stream"
+    ingest_index: int = 0
+    id_strategy: str = ""
+    metadata: Optional[Dict[str, Any]] = None
 
-    model_config = ConfigDict(
-        frozen=True,
-        extra="forbid",
-        validate_assignment=False,
-    )
+    _locked: bool = False
+
+    class Config:
+        extra = "forbid"
+
+    def __init__(self, **data: Any):
+        super().__init__(**data)
+        object.__setattr__(self, "_locked", True)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name.startswith("_"):
+            object.__setattr__(self, name, value)
+            return
+        if getattr(self, "_locked", False):
+            raise TypeError("DocumentRecord is immutable")
+        super().__setattr__(name, value)
+
+    def model_dump(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        data = super().model_dump(*args, **kwargs)
+        return {k: data[k] for k in sorted(data.keys())}
 
     def to_dict(self) -> Dict[str, Any]:
-        data = self.model_dump()
-        return {k: data[k] for k in sorted(data.keys())}
+        return self.model_dump()

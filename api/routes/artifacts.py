@@ -1,51 +1,59 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
-
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
-from storage.adapter import StorageAdapter, StorageError
+from core.errors import ErrorCode
+from core.ordering import sort_dict
+
+router = APIRouter()
 
 
-router = APIRouter(prefix="/artifacts", tags=["artifacts"])
-
-
-def _as_http_error(status_code: int, message: str, details: Optional[Dict[str, Any]] = None) -> HTTPException:
-    payload: Dict[str, Any] = {"message": message}
-    if details is not None:
-        payload["details"] = details
-    return HTTPException(status_code=status_code, detail=payload)
-
-
-@router.get("/{artifact_id}")
-def download_artifact(artifact_id: str) -> Response:
-    storage: StorageAdapter = router.state.storage
-
+@router.get("/artifacts/{artifact_id}")
+def get_artifact(request: Request, artifact_id: str):
     if not isinstance(artifact_id, str) or not artifact_id.strip():
-        raise _as_http_error(400, "artifact_id must be a non-empty string", {"artifact_id": artifact_id})
-
-    try:
-        keys = storage.list_keys(prefix="artifacts/")
-    except StorageError as e:
-        raise _as_http_error(500, "storage error", e.failure.to_dict())
-
-    matches = [k for k in keys if k.startswith(f"artifacts/{artifact_id}")]
-    if not matches:
-        raise _as_http_error(404, "artifact not found", {"artifact_id": artifact_id})
-
-    if len(matches) != 1:
-        raise _as_http_error(
-            409,
-            "artifact id is ambiguous in storage",
-            {"artifact_id": artifact_id, "matches": matches},
+        raise HTTPException(
+            status_code=400,
+            detail=sort_dict(
+                {
+                    "code": ErrorCode.VALIDATION_ERROR.value,
+                    "message": "invalid artifact_id",
+                    "details": {"artifact_id": artifact_id},
+                }
+            ),
         )
 
-    key = matches[0]
+    artifact_service = request.app.state.artifact_service
+    storage = artifact_service.storage
 
     try:
-        data = storage.get_bytes(key)
-    except StorageError as e:
-        raise _as_http_error(500, "storage error", e.failure.to_dict())
+        record = artifact_service.get(artifact_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail=sort_dict(
+                {
+                    "code": ErrorCode.NOT_FOUND.value,
+                    "message": "artifact not found",
+                    "details": {"artifact_id": artifact_id},
+                }
+            ),
+        )
 
-    return Response(content=data, media_type="application/octet-stream")
+    try:
+        data = storage.get_bytes(record.storage_key)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail=sort_dict(
+                {
+                    "code": ErrorCode.NOT_FOUND.value,
+                    "message": "artifact storage missing",
+                    "details": {"artifact_id": artifact_id},
+                }
+            ),
+        )
+
+    media_type = record.media_type if record.media_type else "application/octet-stream"
+
+    return Response(content=data, media_type=media_type)

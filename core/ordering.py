@@ -1,42 +1,67 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Sequence
 
 
 def sort_strings(items: List[str]) -> List[str]:
-    if any(not isinstance(x, str) for x in items):
-        raise ValueError("sort_strings expects a list[str]")
+    if not isinstance(items, list):
+        raise ValueError("items must be a list")
+    for x in items:
+        if not isinstance(x, str):
+            raise ValueError("all items must be strings")
     return sorted(items)
 
 
-def canonicalize_keys(keys: List[str]) -> List[str]:
-    return sort_strings(keys)
+def sort_records(records: List[Dict[str, Any]], keys: List[str]) -> List[Dict[str, Any]]:
+    if not isinstance(records, list):
+        raise ValueError("records must be a list")
+    if not isinstance(keys, list) or not keys:
+        raise ValueError("keys must be a non-empty list")
+    for k in keys:
+        if not isinstance(k, str) or not k.strip():
+            raise ValueError("keys must be non-empty strings")
 
-
-def sort_records(records: List[Dict[str, Any]], key_fields: List[str]) -> List[Dict[str, Any]]:
-    if any(not isinstance(r, dict) for r in records):
-        raise ValueError("sort_records expects a list[dict]")
-    if any(not isinstance(k, str) or not k for k in key_fields):
-        raise ValueError("key_fields must be a list of non-empty strings")
-
-    def key_fn(r: Dict[str, Any]) -> Tuple[Any, ...]:
-        for k in key_fields:
+    for r in records:
+        if not isinstance(r, dict):
+            raise ValueError("each record must be a dict")
+        for k in keys:
             if k not in r:
-                raise ValueError(f"missing key field: {k}")
-        return tuple(r[k] for k in key_fields)
+                raise ValueError("record missing required key")
 
-    try:
-        return sorted(records, key=key_fn)
-    except TypeError as e:
-        raise ValueError("key fields must be mutually comparable across records") from e
+    def _key(r: Dict[str, Any]):
+        return tuple(r[k] for k in keys)
+
+    return sorted(records, key=_key)
 
 
-def sort_by_tuple(items: Sequence[Any], key_tuples: Sequence[Tuple[Any, ...]]) -> List[Any]:
-    if len(items) != len(key_tuples):
-        raise ValueError("items and key_tuples must have the same length")
-    indexed = list(zip(key_tuples, items))
-    try:
-        indexed.sort(key=lambda x: x[0])
-    except TypeError as e:
-        raise ValueError("key_tuples must be comparable") from e
-    return [item for _, item in indexed]
+def sort_dict(d: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(d, dict):
+        raise ValueError("sort_dict requires dict")
+    return {k: d[k] for k in sorted(d.keys())}
+
+
+def sort_dict_recursive(d: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(d, dict):
+        raise ValueError("sort_dict_recursive requires dict")
+    out: Dict[str, Any] = {}
+    for k in sorted(d.keys()):
+        v = d[k]
+        if isinstance(v, dict):
+            out[k] = sort_dict_recursive(v)
+        elif isinstance(v, list):
+            out[k] = sort_list_recursive(v)
+        else:
+            out[k] = v
+    return out
+
+
+def sort_list_recursive(values: Iterable[Any]) -> List[Any]:
+    result: List[Any] = []
+    for v in values:
+        if isinstance(v, dict):
+            result.append(sort_dict_recursive(v))
+        elif isinstance(v, list):
+            result.append(sort_list_recursive(v))
+        else:
+            result.append(v)
+    return result

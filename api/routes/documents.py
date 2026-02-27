@@ -2,67 +2,65 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 
 from api.schemas.document_schemas import DocumentResponse
+from core.errors import ErrorCode, failure
 from services.document_service import DocumentService
 
 
-router = APIRouter(prefix="/documents", tags=["documents"])
+router = APIRouter(tags=["documents"])
 
 
-def _as_http_error(status_code: int, message: str, details: Optional[Dict[str, Any]] = None) -> HTTPException:
-    payload: Dict[str, Any] = {"message": message}
-    if details is not None:
-        payload["details"] = details
-    return HTTPException(status_code=status_code, detail=payload)
+def _svc(request: Request) -> DocumentService:
+    return request.app.state.document_service
 
 
-@router.post("/upload", response_model=DocumentResponse)
-async def upload_document(
-    file: UploadFile = File(...),
-    filename: Optional[str] = Form(default=None),
-    media_type: Optional[str] = Form(default=None),
-) -> DocumentResponse:
-    svc: DocumentService = router.state.document_service
+def _raise(code: ErrorCode, message: str, details: Optional[Dict[str, Any]], status: int):
+    f = failure(code, message, details)
+    raise HTTPException(status_code=status, detail=f.to_dict())
 
+
+@router.post("/documents/upload", response_model=DocumentResponse)
+@router.post("/workspaces/{workspace_id}/documents/upload", response_model=DocumentResponse)
+async def upload_document(request: Request, file: UploadFile = File(...), workspace_id: str = "default"):
     raw = await file.read()
-
-    resolved_filename = filename if filename is not None else (file.filename or "upload.bin")
-    resolved_media_type = media_type if media_type is not None else (file.content_type or "application/octet-stream")
+    filename = file.filename or ""
+    media_type = file.content_type or "application/octet-stream"
 
     try:
-        doc = svc.ingest_bytes(
+        doc = _svc(request).ingest(
             data=raw,
-            filename=resolved_filename,
-            media_type=resolved_media_type,
-            metadata={},
+            ingest_index=0,
+            filename=filename,
+            media_type=media_type,
+            metadata={"workspace_id": workspace_id},
         )
     except ValueError as e:
-        raise _as_http_error(400, str(e))
-    except Exception as e:
-        raise _as_http_error(500, "internal error", {"error": str(e)})
+        _raise(ErrorCode.VALIDATION_ERROR, str(e), {"workspace_id": workspace_id}, 400)
 
     return DocumentResponse.from_domain(doc)
 
 
-@router.get("/{document_id}", response_model=DocumentResponse)
-def get_document(document_id: str) -> DocumentResponse:
-    svc: DocumentService = router.state.document_service
+@router.get("/documents", response_model=List[DocumentResponse])
+@router.get("/workspaces/{workspace_id}/documents", response_model=List[DocumentResponse])
+def list_documents(request: Request, workspace_id: str = "default"):
+    docs = _svc(request).list_documents()
+    filtered = [d for d in docs if d.metadata.get("workspace_id") == workspace_id]
+    return [DocumentResponse.from_domain(d) for d in filtered]
+
+
+@router.get("/documents/{document_id}", response_model=DocumentResponse)
+@router.get("/workspaces/{workspace_id}/documents/{document_id}", response_model=DocumentResponse)
+def get_document(request: Request, document_id: str, workspace_id: str = "default"):
     try:
-        doc = svc.get_document(document_id)
+        doc = _svc(request).get_document(document_id)
     except ValueError as e:
-        raise _as_http_error(400, str(e))
+        _raise(ErrorCode.VALIDATION_ERROR, str(e), {"workspace_id": workspace_id}, 400)
     except KeyError:
-        raise _as_http_error(404, "document not found", {"document_id": document_id})
-    except Exception as e:
-        raise _as_http_error(500, "internal error", {"error": str(e)})
+        _raise(ErrorCode.NOT_FOUND, "document not found", {"document_id": document_id}, 404)
+
+    if doc.metadata.get("workspace_id") != workspace_id:
+        _raise(ErrorCode.NOT_FOUND, "document not found", {"document_id": document_id}, 404)
 
     return DocumentResponse.from_domain(doc)
-
-
-@router.get("", response_model=List[DocumentResponse])
-def list_documents() -> List[DocumentResponse]:
-    svc: DocumentService = router.state.document_service
-    docs = svc.list_documents()
-    return [DocumentResponse.from_domain(d) for d in docs]

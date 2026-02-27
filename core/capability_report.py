@@ -1,39 +1,22 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from dataclasses import dataclass
+from typing import Dict, List
 
-from .capability_contract import Capability
-
-
-@dataclass(frozen=True)
-class DegradationRecord:
-    capability: str
-    reason: str
-    details: Dict[str, Any]
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "capability": self.capability,
-            "reason": self.reason,
-            "details": dict(self.details),
-        }
+from core.capability_contract import Capability
 
 
 @dataclass(frozen=True)
 class CapabilityReport:
+    schema_version: str
     capabilities: Dict[str, Capability]
-    degradations: List[DegradationRecord] = field(default_factory=list)
-    probe_summary: Dict[str, Any] = field(default_factory=dict)
-    schema_version: str = "capability_report_v1"
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
+    def to_dict(self) -> Dict[str, object]:
+        caps: List[Dict[str, object]] = []
+        for name in sorted(self.capabilities.keys()):
+            caps.append(self.capabilities[name].to_dict())
+        payload: Dict[str, object] = {
+            "capabilities": caps,
             "schema_version": self.schema_version,
-            "capabilities": {
-                name: cap.to_dict()
-                for name, cap in sorted(self.capabilities.items())
-            },
-            "degradations": [d.to_dict() for d in self.degradations],
-            "probe_summary": dict(self.probe_summary),
         }
+        return {k: payload[k] for k in sorted(payload.keys())}

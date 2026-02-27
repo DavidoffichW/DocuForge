@@ -1,26 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
-from .capability_contract import Capability, CapabilityStatus
-from .capability_registry import CapabilityRegistry
-from .capability_report import DegradationRecord
-from .errors import Failure, capability_failure, policy_blocked
+from core.capability_contract import CapabilityStatus
+from core.capability_registry import CapabilityRegistry
+from core.errors import ErrorCode, Failure, failure
 
 
 @dataclass(frozen=True)
-class PolicyDecision:
+class Decision:
     allowed: bool
     failure: Optional[Failure] = None
-    degradation: Optional[DegradationRecord] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "allowed": self.allowed,
-            "failure": self.failure.to_dict() if self.failure else None,
-            "degradation": self.degradation.to_dict() if self.degradation else None,
-        }
 
 
 @dataclass(frozen=True)
@@ -28,125 +19,60 @@ class ProviderResolution:
     status: str
     provider: Optional[str]
     failure: Optional[Failure]
-    degradation: Optional[DegradationRecord]
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "status": self.status,
-            "provider": self.provider,
-            "failure": self.failure.to_dict() if self.failure else None,
-            "degradation": self.degradation.to_dict() if self.degradation else None,
-        }
+    degradation: Optional[dict]
 
 
 class ExecutionPolicy:
     def __init__(self, registry: CapabilityRegistry):
         self._registry = registry
 
-    def require(self, capability_name: str) -> PolicyDecision:
+    def require(self, capability_name: str) -> Decision:
         if not isinstance(capability_name, str) or not capability_name.strip():
-            return PolicyDecision(
-                allowed=False,
-                failure=policy_blocked(
-                    "capability_name must be a non-empty string",
-                    {"capability": capability_name},
-                ),
-                degradation=None,
-            )
+            raise ValueError("capability_name must be a non-empty string")
 
         try:
             cap = self._registry.get(capability_name)
         except KeyError:
-            return PolicyDecision(
-                allowed=False,
-                failure=capability_failure(
-                    capability_name,
-                    "Capability not registered",
-                    {"capability": capability_name},
-                ),
-                degradation=None,
+            f = failure(
+                ErrorCode.CAPABILITY_UNAVAILABLE,
+                "unknown capability",
+                {"capability": capability_name},
             )
+            return Decision(allowed=False, failure=f)
 
         if cap.status == CapabilityStatus.AVAILABLE:
-            return PolicyDecision(allowed=True, failure=None, degradation=None)
+            return Decision(allowed=True, failure=None)
 
-        if cap.status == CapabilityStatus.DEGRADED:
-            return PolicyDecision(
-                allowed=True,
-                failure=None,
-                degradation=DegradationRecord(
-                    capability=capability_name,
-                    reason="degraded",
-                    details={"degradation_reason": cap.degradation_reason},
-                ),
-            )
-
-        return PolicyDecision(
-            allowed=False,
-            failure=capability_failure(
-                capability_name,
-                "Capability unavailable",
-                {"degradation_reason": cap.degradation_reason},
-            ),
-            degradation=DegradationRecord(
-                capability=capability_name,
-                reason="unavailable",
-                details={"degradation_reason": cap.degradation_reason},
-            ),
+        f = failure(
+            ErrorCode.CAPABILITY_UNAVAILABLE,
+            "capability unavailable",
+            {"capability": capability_name, "status": cap.status.value},
         )
+        return Decision(allowed=False, failure=f)
 
-    def resolve_provider_chain(
-        self,
-        capability_name: str,
-        preference: Optional[List[str]] = None,
-    ) -> ProviderResolution:
-        if preference is not None and any((not isinstance(p, str) or not p.strip()) for p in preference):
+    def resolve_provider_chain(self, capability_name: str, preference: Optional[List[str]] = None) -> ProviderResolution:
+        decision = self.require(capability_name)
+        if not decision.allowed:
             return ProviderResolution(
                 status="BLOCKED",
                 provider=None,
-                failure=policy_blocked("provider_preference must be list[str] of non-empty strings", {}),
+                failure=decision.failure,
                 degradation=None,
             )
 
-        providers = self._build_provider_chain(capability_name)
+        cap = self._registry.get(capability_name)
+        providers = list(cap.providers)
 
         if preference:
-            pref_set = {p for p in preference}
-            filtered = [p for p in providers if p in pref_set]
-            providers = filtered if filtered else providers
+            preferred = [p for p in preference if p in providers]
+            if preferred:
+                providers = preferred
 
-        for p in providers:
-            decision = self.require(p)
-            if decision.allowed:
-                return ProviderResolution(
-                    status="OK",
-                    provider=p,
-                    failure=None,
-                    degradation=decision.degradation,
-                )
+        provider = providers[0] if providers else None
 
         return ProviderResolution(
-            status="BLOCKED",
-            provider=None,
-            failure=capability_failure(
-                capability_name,
-                "No provider available for capability chain",
-                {"providers": providers},
-            ),
-            degradation=DegradationRecord(
-                capability=capability_name,
-                reason="unavailable",
-                details={"providers": providers},
-            ),
+            status="OK",
+            provider=provider,
+            failure=None,
+            degradation=None,
         )
-
-    def _build_provider_chain(self, capability_name: str) -> List[str]:
-        base = [capability_name]
-        try:
-            cap = self._registry.get(capability_name)
-        except KeyError:
-            return base
-
-        if cap.fallback_strategy and isinstance(cap.fallback_strategy, str) and cap.fallback_strategy.strip():
-            base.append(cap.fallback_strategy.strip())
-        return base

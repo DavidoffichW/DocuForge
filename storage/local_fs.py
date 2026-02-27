@@ -1,177 +1,87 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
+from pathlib import Path
+from typing import List, Union
 
-from core.errors import ErrorCode, failure
-from core.ids import sha256_hex
+from core.errors import ErrorCode, StorageCollisionError, failure
 from core.ordering import sort_strings
-
-from .adapter import StorageAdapter, StorageError
+from storage.adapter import StorageAdapter
 
 
 class LocalFSStorage(StorageAdapter):
-    def __init__(self, root_dir: str = "data"):
-        super().__init__(root_dir=root_dir)
-        self._ensure_root()
+    def __init__(self, root_dir: Union[str, os.PathLike]):
+        root = Path(root_dir)
+        root.mkdir(parents=True, exist_ok=True)
+        self._root = root.resolve()
 
-    def _ensure_root(self) -> None:
-        try:
-            os.makedirs(self._root_dir, exist_ok=True)
-            os.makedirs(os.path.join(self._root_dir, "documents"), exist_ok=True)
-            os.makedirs(os.path.join(self._root_dir, "artifacts"), exist_ok=True)
-        except Exception as e:
-            raise StorageError(
-                failure(
-                    ErrorCode.STORAGE_ERROR,
-                    "failed to initialize storage root directories",
-                    {"root_dir": self._root_dir, "error": str(e)},
-                )
-            )
+    @property
+    def root_dir(self) -> Path:
+        return self._root
 
-    def _path_for_key(self, key: str) -> str:
-        self.validate_key(key)
-        parts = key.split("/")
-        return os.path.join(self._root_dir, *parts)
+    def _normalize_key(self, key: str) -> str:
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("storage key must be a non-empty string")
+        k = key.replace("\\", "/").lstrip("/")
+        if k == "":
+            raise ValueError("storage key must be a non-empty string")
+        return k
 
-    def put_bytes(self, key: str, data: bytes) -> None:
-        self.validate_key(key)
-        if not isinstance(data, (bytes, bytearray)):
-            raise StorageError(failure(ErrorCode.VALIDATION_ERROR, "data must be bytes", {"key": key}))
-
-        path = self._path_for_key(key)
-        parent = os.path.dirname(path)
-
-        try:
-            os.makedirs(parent, exist_ok=True)
-        except Exception as e:
-            raise StorageError(
-                failure(
-                    ErrorCode.STORAGE_ERROR,
-                    "failed to create parent directories",
-                    {"key": key, "parent": parent, "error": str(e)},
-                )
-            )
-
-        if os.path.exists(path):
-            try:
-                with open(path, "rb") as f:
-                    existing = f.read()
-            except Exception as e:
-                raise StorageError(
-                    failure(
-                        ErrorCode.STORAGE_ERROR,
-                        "failed to read existing object for collision check",
-                        {"key": key, "error": str(e)},
-                    )
-                )
-
-            if sha256_hex(existing) == sha256_hex(bytes(data)):
-                return
-
-            raise StorageError(
-                failure(
-                    ErrorCode.STORAGE_ERROR,
-                    "storage key collision with different content",
-                    {
-                        "key": key,
-                        "existing_sha256": sha256_hex(existing),
-                        "new_sha256": sha256_hex(bytes(data)),
-                    },
-                )
-            )
-
-        try:
-            with open(path, "wb") as f:
-                f.write(bytes(data))
-        except Exception as e:
-            raise StorageError(
-                failure(
-                    ErrorCode.STORAGE_ERROR,
-                    "failed to write object",
-                    {"key": key, "path": path, "error": str(e)},
-                )
-            )
-
-    def get_bytes(self, key: str) -> bytes:
-        path = self._path_for_key(key)
-        if not os.path.exists(path):
-            raise StorageError(
-                failure(
-                    ErrorCode.STORAGE_ERROR,
-                    "object not found",
-                    {"key": key},
-                )
-            )
-        try:
-            with open(path, "rb") as f:
-                return f.read()
-        except Exception as e:
-            raise StorageError(
-                failure(
-                    ErrorCode.STORAGE_ERROR,
-                    "failed to read object",
-                    {"key": key, "path": path, "error": str(e)},
-                )
-            )
+    def _resolve_key(self, key: str) -> Path:
+        k = self._normalize_key(key)
+        p = (self._root / k).resolve()
+        if p != self._root and self._root not in p.parents:
+            raise ValueError("storage key escapes root")
+        return p
 
     def exists(self, key: str) -> bool:
-        path = self._path_for_key(key)
-        return os.path.exists(path)
+        return self._resolve_key(key).exists()
 
-    def list_keys(self, prefix: Optional[str] = None) -> list[str]:
-        if prefix is not None:
-            if not isinstance(prefix, str) or not prefix.strip():
-                raise StorageError(failure(ErrorCode.VALIDATION_ERROR, "prefix must be a non-empty string if provided", {"prefix": prefix}))
-            if not (prefix.startswith("documents/") or prefix.startswith("artifacts/")):
-                raise StorageError(
+    def get_bytes(self, key: str) -> bytes:
+        p = self._resolve_key(key)
+        if not p.exists():
+            raise FileNotFoundError(key)
+        if not p.is_file():
+            raise ValueError("object is not a file")
+        return p.read_bytes()
+
+    def put_bytes(self, key: str, data: bytes, overwrite: bool = False) -> None:
+        if not isinstance(data, (bytes, bytearray)):
+            raise ValueError("data must be bytes")
+        p = self._resolve_key(key)
+        p.parent.mkdir(parents=True, exist_ok=True)
+
+        new_bytes = bytes(data)
+
+        if p.exists() and p.is_file():
+            existing = p.read_bytes()
+            if existing == new_bytes:
+                return
+            if not overwrite:
+                raise StorageCollisionError(
                     failure(
-                        ErrorCode.VALIDATION_ERROR,
-                        "prefix must start with an allowed prefix",
-                        {"prefix": prefix, "allowed_prefixes": ["documents/", "artifacts/"]},
+                        ErrorCode.COLLISION,
+                        "object already exists with different content",
+                        {"key": self._normalize_key(key)},
                     )
                 )
-            if "\\" in prefix:
-                raise StorageError(failure(ErrorCode.VALIDATION_ERROR, "prefix must not contain backslashes", {"prefix": prefix}))
-            if ".." in prefix.replace("\\", "/").split("/"):
-                raise StorageError(failure(ErrorCode.VALIDATION_ERROR, "prefix must not contain '..' segments", {"prefix": prefix}))
 
-        keys: list[str] = []
-        base_dir = self._root_dir
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        tmp.write_bytes(new_bytes)
+        tmp.replace(p)
 
-        start_dir = base_dir
-        if prefix is not None:
-            start_dir = os.path.join(base_dir, *prefix.split("/"))
-
-        if not os.path.exists(start_dir):
+    def list_keys(self, prefix: str) -> List[str]:
+        pref = self._normalize_key(prefix) if prefix is not None else ""
+        base = self._resolve_key(pref) if pref else self._root
+        if not base.exists():
             return []
+        if base.is_file():
+            rel = base.relative_to(self._root).as_posix()
+            return [rel]
 
-        for root, _, files in os.walk(start_dir):
-            rel_root = os.path.relpath(root, base_dir)
-            rel_root = "" if rel_root == "." else rel_root.replace("\\", "/")
-            for fname in files:
-                rel = f"{rel_root}/{fname}" if rel_root else fname
-                rel = rel.replace("\\", "/")
-                if prefix is None:
-                    if rel.startswith("documents/") or rel.startswith("artifacts/"):
-                        keys.append(rel)
-                else:
-                    if rel.startswith(prefix):
-                        keys.append(rel)
-
+        keys: List[str] = []
+        for fp in base.rglob("*"):
+            if fp.is_file():
+                rel = fp.relative_to(self._root).as_posix()
+                keys.append(rel)
         return sort_strings(keys)
-
-    def delete(self, key: str) -> None:
-        path = self._path_for_key(key)
-        if not os.path.exists(path):
-            return
-        try:
-            os.remove(path)
-        except Exception as e:
-            raise StorageError(
-                failure(
-                    ErrorCode.STORAGE_ERROR,
-                    "failed to delete object",
-                    {"key": key, "path": path, "error": str(e)},
-                )
-            )
