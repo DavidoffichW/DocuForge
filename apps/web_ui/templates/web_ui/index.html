@@ -1,0 +1,108 @@
+{% extends "web_ui/base.html" %}
+{% block content %}
+  <div class="row">
+    <div class="card" style="flex: 1; min-width: 320px;">
+      <h3 style="margin: 0 0 8px 0;">Upload document</h3>
+      <div class="muted" style="margin-bottom: 10px;">Uploads to <span class="mono">{{ api_base|default:"" }}/documents/upload</span></div>
+      <form id="uploadForm">
+        <div class="row" style="margin-bottom: 10px;">
+          <input id="fileInput" type="file" name="file" required />
+          <input id="filenameInput" type="text" placeholder="override filename (optional)" />
+          <input id="mediaTypeInput" type="text" placeholder="override media_type (optional)" />
+          <button type="submit">Upload</button>
+        </div>
+      </form>
+      <div id="uploadResult" class="mono" style="white-space: pre-wrap; font-size: 12px;"></div>
+    </div>
+
+    <div class="card" style="flex: 1; min-width: 320px;">
+      <h3 style="margin: 0 0 8px 0;">Documents</h3>
+      <div class="row" style="margin-bottom: 10px;">
+        <button id="refreshBtn" type="button">Refresh</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>document_id</th>
+            <th>filename</th>
+            <th>media_type</th>
+            <th>bytes</th>
+            <th>open</th>
+          </tr>
+        </thead>
+        <tbody id="docsTbody"></tbody>
+      </table>
+      <div id="docsErr" class="mono bad" style="margin-top: 8px; white-space: pre-wrap;"></div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = "{{ api_base|escapejs }}";
+    const api = (p) => (API_BASE ? (API_BASE + p) : p);
+
+    function setText(id, txt, cls) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = txt || "";
+      el.className = cls || el.className;
+    }
+
+    async function refreshDocs() {
+      setText("docsErr", "");
+      const tbody = document.getElementById("docsTbody");
+      tbody.innerHTML = "";
+      try {
+        const r = await fetch(api("/documents"), { method: "GET" });
+        const payload = await r.json();
+        if (!r.ok) {
+          setText("docsErr", JSON.stringify(payload, null, 2));
+          return;
+        }
+        for (const d of payload) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td class="mono">${d.document_id}</td>
+            <td>${d.filename}</td>
+            <td class="mono">${d.media_type}</td>
+            <td class="mono">${d.byte_size}</td>
+            <td><a href="/doc/${encodeURIComponent(d.document_id)}/">open</a></td>
+          `;
+          tbody.appendChild(tr);
+        }
+      } catch (e) {
+        setText("docsErr", String(e));
+      }
+    }
+
+    document.getElementById("refreshBtn").addEventListener("click", refreshDocs);
+
+    document.getElementById("uploadForm").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      setText("uploadResult", "");
+
+      const f = document.getElementById("fileInput").files[0];
+      if (!f) return;
+
+      const form = new FormData();
+      form.append("file", f);
+
+      const filename = document.getElementById("filenameInput").value.trim();
+      const mediaType = document.getElementById("mediaTypeInput").value.trim();
+      if (filename) form.append("filename", filename);
+      if (mediaType) form.append("media_type", mediaType);
+
+      try {
+        const r = await fetch(api("/documents/upload"), { method: "POST", body: form });
+        const payload = await r.json();
+        setText("uploadResult", JSON.stringify(payload, null, 2));
+        if (r.ok && payload && payload.document_id) {
+          await refreshDocs();
+        }
+      } catch (e) {
+        setText("uploadResult", String(e));
+      }
+    });
+
+    refreshDocs();
+  </script>
+{% endblock %}

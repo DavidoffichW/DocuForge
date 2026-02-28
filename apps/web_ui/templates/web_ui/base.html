@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{{ title|default:"DocuForge" }}</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; padding: 0; }
+      header { padding: 12px 16px; border-bottom: 1px solid #e5e5e5; display: flex; gap: 12px; align-items: center; }
+      header a { text-decoration: none; color: #111; }
+      main { padding: 16px; }
+      .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      .card { border: 1px solid #e5e5e5; border-radius: 8px; padding: 12px; }
+      .muted { color: #666; font-size: 12px; }
+      button { padding: 8px 10px; border: 1px solid #ddd; background: #fff; border-radius: 6px; cursor: pointer; }
+      input[type="text"], input[type="file"] { padding: 8px; border: 1px solid #ddd; border-radius: 6px; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #eee; padding: 8px; text-align: left; font-size: 13px; }
+      th { background: #fafafa; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+      .ok { color: #0a7a2f; }
+      .bad { color: #b00020; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a href="{% url 'web_ui:index' %}"><strong>DocuForge</strong></a>
+      <a href="{% url 'web_ui:views_page' %}">Views</a>
+      <span class="muted">API: <span class="mono">{{ api_base|default:"(same-origin)" }}</span></span>
+    </header>
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>
