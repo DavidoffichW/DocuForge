@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi.responses import Response
 
 from api.schemas.document_schemas import DocumentResponse
 from core.errors import ErrorCode, failure
@@ -10,6 +11,8 @@ from services.document_service import DocumentService
 
 
 router = APIRouter(tags=["documents"])
+
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
 
 def _svc(request: Request) -> DocumentService:
@@ -25,6 +28,14 @@ def _raise(code: ErrorCode, message: str, details: Optional[Dict[str, Any]], sta
 @router.post("/workspaces/{workspace_id}/documents/upload", response_model=DocumentResponse)
 async def upload_document(request: Request, file: UploadFile = File(...), workspace_id: str = "default"):
     raw = await file.read()
+    if len(raw) > MAX_UPLOAD_BYTES:
+        _raise(
+            ErrorCode.VALIDATION_ERROR,
+            "upload size limit exceeded",
+            {"max_upload_bytes": MAX_UPLOAD_BYTES, "workspace_id": workspace_id},
+            400,
+        )
+
     filename = file.filename or ""
     media_type = file.content_type or "application/octet-stream"
 
@@ -64,3 +75,27 @@ def get_document(request: Request, document_id: str, workspace_id: str = "defaul
         _raise(ErrorCode.NOT_FOUND, "document not found", {"document_id": document_id}, 404)
 
     return DocumentResponse.from_domain(doc)
+
+
+@router.get("/documents/{document_id}/content")
+@router.get("/workspaces/{workspace_id}/documents/{document_id}/content")
+def get_document_content(request: Request, document_id: str, workspace_id: str = "default"):
+    svc = _svc(request)
+    try:
+        doc = svc.get_document(document_id)
+    except KeyError:
+        _raise(ErrorCode.NOT_FOUND, "document not found", {"document_id": document_id}, 404)
+    except ValueError as e:
+        _raise(ErrorCode.VALIDATION_ERROR, str(e), {"document_id": document_id}, 400)
+
+    if doc.metadata.get("workspace_id") != workspace_id:
+        _raise(ErrorCode.NOT_FOUND, "document not found", {"document_id": document_id}, 404)
+
+    storage = svc.storage
+    try:
+        data = storage.get_bytes(doc.storage_key)
+    except FileNotFoundError:
+        _raise(ErrorCode.NOT_FOUND, "document storage missing", {"document_id": document_id}, 404)
+
+    media_type = doc.media_type or "application/octet-stream"
+    return Response(content=data, media_type=media_type)

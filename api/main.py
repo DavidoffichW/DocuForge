@@ -11,12 +11,22 @@ from api.routes.jobs import router as jobs_router
 from core.capability_registry import build_registry
 from core.execution_policy import ExecutionPolicy
 from core.errors import ErrorCode
-from core.ordering import sort_dict
 from core.ids import HybridDocumentIdStrategy
+from core.ordering import sort_dict
 from services.artifact_service import ArtifactService
 from services.document_service import DocumentService
 from services.job_service import JobService
 from storage.local_fs import LocalFSStorage
+
+from execution.pdf.preview import make_pdf_preview_execution
+from execution.pdf.merge import make_pdf_merge_execution
+from execution.pdf.reorder import make_pdf_reorder_execution
+from execution.pdf.remove import make_pdf_remove_execution
+from execution.pdf.extract import make_pdf_extract_execution
+from execution.tables.detect import make_tables_detect_execution
+from execution.tables.export_csv import make_tables_export_csv_execution
+from execution.tables.export_jsonl import make_tables_export_jsonl_execution
+from execution.tables.export_zip import make_tables_export_zip_execution
 
 
 def _canonical_error_response(code: str, message: str, details: Optional[Dict[str, Any]], status: int):
@@ -57,11 +67,24 @@ def create_app(
     def _noop_exec(payload: Dict[str, Any]):
         return b"", {"kind": "bin", "media_type": "application/octet-stream", "manifest": {}}
 
+    execution_map: Dict[str, Any] = {
+        "noop": _noop_exec,
+        "pdf.preview": make_pdf_preview_execution(docs),
+        "pdf.merge": make_pdf_merge_execution(docs),
+        "pdf.reorder": make_pdf_reorder_execution(docs),
+        "pdf.remove": make_pdf_remove_execution(docs),
+        "pdf.extract": make_pdf_extract_execution(docs),
+        "tables.detect": make_tables_detect_execution(docs),
+        "tables.export.csv": make_tables_export_csv_execution(),
+        "tables.export.jsonl": make_tables_export_jsonl_execution(),
+        "tables.export.zip": make_tables_export_zip_execution(),
+    }
+
     jobs = job_service if job_service is not None else JobService(
         policy=pol,
         documents=docs,
         artifacts=arts,
-        execution_map={"noop": _noop_exec},
+        execution_map=execution_map,
     )
 
     app.state.storage = st

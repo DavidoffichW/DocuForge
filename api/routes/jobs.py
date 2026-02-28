@@ -7,6 +7,8 @@ from fastapi import APIRouter, HTTPException, Request
 from core.errors import ErrorCode
 from core.ordering import sort_dict
 from domain.job import JobStatus
+from execution.validation.validators import validate_operation_params
+
 
 router = APIRouter()
 
@@ -18,6 +20,20 @@ def execute_job(request: Request, payload: Dict[str, Any]):
     operation = payload.get("operation")
     input_ref = payload.get("input_ref", {})
     params = payload.get("params", {})
+
+    try:
+        validate_operation_params(operation, params)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=sort_dict(
+                {
+                    "code": ErrorCode.VALIDATION_ERROR.value,
+                    "message": str(e),
+                    "details": {"operation": operation},
+                }
+            ),
+        )
 
     record = job_service.execute(
         operation=operation,
