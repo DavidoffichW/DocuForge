@@ -1,6 +1,14 @@
+.venv/
 venv/
 __pycache__/
-*.pyc
+*.py[cod]
 *.sqlite3
 .env
 .pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+.docuforge-workspace/
+playwright-report/
+test-results/

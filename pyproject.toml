@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "docuforge"
+version = "0.1.0.dev0"
+description = "Local-first PDF viewing and page-organization workspace"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "pikepdf>=10.17,<11",
+  "pydantic>=2.10,<3",
+  "pypdf>=6,<7",
+  "python-multipart>=0.0.20,<1",
+  "uvicorn>=0.34,<1",
+]
+
+[project.scripts]
+docuforge = "docuforge.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["docuforge*"]
+
+[tool.setuptools.package-data]
+docuforge = ["editor/**/*"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+markers = [
+  "browser: exercises the integrated application in a real browser",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

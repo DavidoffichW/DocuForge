@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>DocuForge</title>
+    <link rel="stylesheet" href="/assets/vendor/pdfjs/web/pdf_viewer.css">
+    <link rel="stylesheet" href="/assets/app.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">D</span><strong>DocuForge</strong></div>
+      <label class="primary-button" for="open-file">Open PDF</label>
+      <input id="open-file" type="file" accept="application/pdf,.pdf" hidden>
+      <button id="save-button" disabled>Save</button>
+      <button id="save-as-button" disabled>Save As</button>
+      <span class="divider"></span>
+      <button id="undo-button" aria-label="Undo" disabled>↶</button>
+      <button id="redo-button" aria-label="Redo" disabled>↷</button>
+      <span class="divider"></span>
+      <button id="previous-page" aria-label="Previous page" disabled>‹</button>
+      <label class="page-field"><input id="page-number" type="number" min="1" value="1" disabled> / <span id="page-count">0</span></label>
+      <button id="next-page" aria-label="Next page" disabled>›</button>
+      <span class="divider"></span>
+      <button id="zoom-out" aria-label="Zoom out" disabled>−</button>
+      <select id="zoom-select" aria-label="Zoom" disabled>
+        <option value="page-width">Fit width</option>
+        <option value="page-fit">Fit page</option>
+        <option value="0.75">75%</option>
+        <option value="1">100%</option>
+        <option value="1.25">125%</option>
+        <option value="1.5">150%</option>
+        <option value="2">200%</option>
+      </select>
+      <button id="zoom-in" aria-label="Zoom in" disabled>+</button>
+      <span class="divider"></span>
+      <input id="search-field" type="search" placeholder="Search document" disabled>
+      <button id="search-button" disabled>Find</button>
+      <div class="document-label">
+        <span id="document-title">No document open</span>
+        <span id="dirty-marker" class="dirty" hidden>Unsaved</span>
+      </div>
+      <button id="theme-button" aria-label="Toggle theme">◐</button>
+    </header>
+
+    <main class="workspace-shell">
+      <aside class="left-panel" aria-label="Pages and documents">
+        <div class="panel-tabs" role="tablist">
+          <button class="tab active" data-panel="pages-panel">Pages</button>
+          <button class="tab" data-panel="documents-panel">Documents</button>
+        </div>
+        <section id="pages-panel" class="panel-body active">
+          <div class="page-actions">
+            <button id="rotate-left" disabled>Rotate left</button>
+            <button id="rotate-right" disabled>Rotate right</button>
+            <button id="delete-pages" disabled>Delete</button>
+            <button id="extract-pages" disabled>Extract</button>
+          </div>
+          <p class="hint">Drag thumbnails to reorder. Check pages for group actions.</p>
+          <div id="thumbnail-list" class="thumbnail-list" aria-label="Page thumbnails"></div>
+        </section>
+        <section id="documents-panel" class="panel-body">
+          <button id="refresh-documents">Refresh library</button>
+          <div id="document-list" class="document-list"></div>
+        </section>
+      </aside>
+
+      <section class="viewer-region">
+        <div id="empty-state" class="empty-state">
+          <div class="empty-icon">PDF</div>
+          <h1>Open a PDF to begin</h1>
+          <p>Organize pages without changing the source. Save creates an immutable version.</p>
+          <label class="primary-button" for="open-file">Choose a PDF</label>
+        </div>
+        <div id="viewerContainer" class="viewer-container" hidden>
+          <div id="viewer" class="pdfViewer"></div>
+        </div>
+        <div id="progress" class="progress" hidden><span></span><output>Working…</output></div>
+      </section>
+
+      <aside class="right-panel" aria-label="Page properties">
+        <h2>Page properties</h2>
+        <dl>
+          <dt>Page</dt><dd id="property-page">—</dd>
+          <dt>Source page</dt><dd id="property-source">—</dd>
+          <dt>Rotation</dt><dd id="property-rotation">—</dd>
+          <dt>Stable ID</dt><dd id="property-id">—</dd>
+        </dl>
+        <div class="operation-note">
+          <h3>Version model</h3>
+          <p>Edits are reversible commands. The original PDF remains unchanged until Save creates a new version.</p>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="statusbar">
+      <span id="status-message" role="status">Ready</span>
+      <span id="version-label"></span>
+    </footer>
+    <div id="toast" class="toast" role="alert" hidden></div>
+    <script type="module" src="/assets/app.js"></script>
+  </body>
+</html>

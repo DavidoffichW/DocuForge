@@ -1,47 +1,70 @@
-import sys
+from __future__ import annotations
+
+import io
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+
+from docuforge.config import Settings
+from docuforge.pdf_engine import PdfEngine
+from docuforge.repository import Repository
+from docuforge.service import DocumentManager
+from docuforge.storage import ManagedStorage
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from api.main import create_app
-from core.capability_registry import build_registry
-from core.execution_policy import ExecutionPolicy
-from core.ids import HybridDocumentIdStrategy
-from services.artifact_service import ArtifactService
-from services.document_service import DocumentService
-from services.job_service import JobService
-from storage.local_fs import LocalFSStorage
+def build_pdf(
+    *,
+    pages: int = 3,
+    title: str = "Synthetic fixture",
+    interactive: bool = False,
+) -> bytes:
+    output = io.BytesIO()
+    pdf = canvas.Canvas(output, pagesize=letter, pageCompression=1)
+    pdf.setTitle(title)
+    for index in range(pages):
+        page_number = index + 1
+        pdf.bookmarkPage(f"page-{page_number}")
+        pdf.addOutlineEntry(f"Section {page_number}", f"page-{page_number}", level=0)
+        pdf.setFont("Helvetica", 14)
+        pdf.drawString(72, 720, f"Fixture page {page_number}")
+        if interactive and index == 0:
+            pdf.linkURL("https://example.invalid/docuforge", (72, 680, 260, 700), relative=0)
+            if pages > 1:
+                pdf.linkRect("next", "page-2", (72, 650, 160, 670), relative=0)
+            pdf.textAnnotation("review note", Rect=(300, 650, 320, 670))
+            pdf.acroForm.textfield(
+                name="reviewer",
+                value="DocuForge",
+                x=72,
+                y=600,
+                width=160,
+                height=20,
+            )
+        pdf.showPage()
+    pdf.save()
+    return output.getvalue()
 
 
 @pytest.fixture
-def app(tmp_path):
-    storage = LocalFSStorage(root_dir=str(tmp_path))
-    registry = build_registry()
-    policy = ExecutionPolicy(registry)
-
-    document_service = DocumentService(storage=storage)
-    artifact_service = ArtifactService(storage=storage)
-
-    execution_map = {}
-
-    job_service = JobService(
-        policy=policy,
-        documents=document_service,
-        artifacts=artifact_service,
-        execution_map=execution_map,
-    )
-
-    app = create_app()
-
-    return app
+def pdf_bytes() -> bytes:
+    return build_pdf()
 
 
 @pytest.fixture
-def client(app):
-    return TestClient(app)
+def interactive_pdf_bytes() -> bytes:
+    return build_pdf(interactive=True)
+
+
+@pytest.fixture
+def large_pdf_bytes() -> bytes:
+    return build_pdf(pages=30)
+
+
+@pytest.fixture
+def manager(tmp_path: Path) -> DocumentManager:
+    settings = Settings(workspace_root=tmp_path / "managed", max_upload_bytes=2_000_000)
+    repository = Repository(settings.workspace_root / "docuforge.sqlite3")
+    storage = ManagedStorage(settings.workspace_root)
+    return DocumentManager(settings, repository, storage, PdfEngine())
