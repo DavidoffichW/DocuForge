@@ -100,6 +100,7 @@ def test_browser_extract_and_large_document_navigation(
         }
     )
     expect(page.locator(".thumbnail")).to_have_count(30, timeout=15_000)
+    page.locator(".thumbnail canvas").first.wait_for(timeout=15_000)
     visible_canvases = page.locator(".thumbnail canvas").count()
     assert 1 <= visible_canvases < 30
 
