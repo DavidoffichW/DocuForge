@@ -9,6 +9,7 @@ description = "Local-first PDF viewing and page-organization workspace"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 dependencies = [
   "fastapi>=0.115,<1",
   "pikepdf>=10.17,<11",
