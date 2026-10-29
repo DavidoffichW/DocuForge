@@ -43,7 +43,7 @@ would create a known dangling internal link is rejected rather than silently
 degrading the document.
 
 Fidelity validation compares page content, navigation, annotations, forms, and
-resource structure. Decoded image-resource hashing is capped at 16 MiB per
+resource structure. Decoded image-resource hashing is capped at 1 MiB per
 semantic inspection; larger or unsupported image encodings are compared by
 their declared structure rather than by decoding every pixel.
 

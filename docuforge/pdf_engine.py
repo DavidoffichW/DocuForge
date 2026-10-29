@@ -60,7 +60,7 @@ def _content_sha256(page: Any) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-RESOURCE_DIGEST_BUDGET = 16 * 1024 * 1024
+RESOURCE_DIGEST_BUDGET = 1 * 1024 * 1024
 
 
 def _stream_digest(
