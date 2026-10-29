@@ -102,6 +102,47 @@ def _image_decoded_size(value: Any) -> int | None:
     return (width * height * bits * components + 7) // 8
 
 
+def _color_space_signature(value: Any) -> Any:
+    try:
+        resolved = value.get_object() if hasattr(value, "get_object") else value
+    except Exception:
+        return str(value)
+    if not isinstance(resolved, (list, ArrayObject)):
+        return str(resolved)
+    if not resolved:
+        return []
+    kind = str(resolved[0])
+    if kind == "/ICCBased" and len(resolved) > 1:
+        try:
+            profile = resolved[1].get_object()
+            return {
+                "kind": kind,
+                "components": int(profile.get("/N", 0) or 0),
+                "alternate": str(profile.get("/Alternate", "")),
+            }
+        except Exception:
+            return {"kind": kind}
+    if kind == "/Indexed" and len(resolved) > 2:
+        return {
+            "kind": kind,
+            "base": _color_space_signature(resolved[1]),
+            "high_value": int(resolved[2]),
+        }
+    if kind == "/Separation" and len(resolved) > 2:
+        return {
+            "kind": kind,
+            "name": str(resolved[1]),
+            "alternate": _color_space_signature(resolved[2]),
+        }
+    if kind == "/DeviceN" and len(resolved) > 2:
+        return {
+            "kind": kind,
+            "names": [str(item) for item in resolved[1]],
+            "alternate": _color_space_signature(resolved[2]),
+        }
+    return {"kind": kind}
+
+
 def _resource_signature(page: Any, budget: list[int]) -> dict[str, Any]:
     resources = page.get("/Resources") or {}
     try:
@@ -125,7 +166,7 @@ def _resource_signature(page: Any, budget: list[int]) -> dict[str, Any]:
                 "subtype": str(value.get("/Subtype", "")),
                 "width": int(value.get("/Width", 0) or 0),
                 "height": int(value.get("/Height", 0) or 0),
-                "color_space": str(value.get("/ColorSpace", "")),
+                "color_space": _color_space_signature(value.get("/ColorSpace", "")),
                 "bits_per_component": int(value.get("/BitsPerComponent", 0) or 0),
                 "data_sha256": _stream_digest(
                     value,
@@ -154,6 +195,31 @@ def _resource_signature(page: Any, budget: list[int]) -> dict[str, Any]:
             }
         )
     return {"xobjects": xobjects, "fonts": fonts}
+
+
+def _resources_equivalent(expected: dict[str, Any], actual: dict[str, Any]) -> bool:
+    if expected["fonts"] != actual["fonts"]:
+        return False
+    expected_xobjects = expected["xobjects"]
+    actual_xobjects = actual["xobjects"]
+    if len(expected_xobjects) != len(actual_xobjects):
+        return False
+    for left, right in zip(expected_xobjects, actual_xobjects, strict=True):
+        left_structure = {
+            key: value for key, value in left.items() if key != "data_sha256"
+        }
+        right_structure = {
+            key: value for key, value in right.items() if key != "data_sha256"
+        }
+        if left_structure != right_structure:
+            return False
+        if (
+            left["data_sha256"] is not None
+            and right["data_sha256"] is not None
+            and left["data_sha256"] != right["data_sha256"]
+        ):
+            return False
+    return True
 
 
 def _annotation_signature(annotation: Any) -> dict[str, Any]:
@@ -426,12 +492,13 @@ class PdfEngine:
                 "media_box",
                 "crop_box",
                 "content_sha256",
-                "resources",
                 "annotations",
                 "annotation_details",
             ):
                 if output_page[key] != source_page[key]:
                     raise FidelityError(f"saved PDF changed page {output_index + 1} {key}")
+            if not _resources_equivalent(source_page["resources"], output_page["resources"]):
+                raise FidelityError(f"saved PDF changed page {output_index + 1} resources")
             if output_page["rotation"] != expected_rotation:
                 raise FidelityError("saved PDF rotation does not match the page map")
             if output_page["external_links"] != source_page["external_links"]:
@@ -698,7 +765,6 @@ class PdfEngine:
                     "media_box",
                     "crop_box",
                     "content_sha256",
-                    "resources",
                     "annotations",
                     "annotation_details",
                     "external_links",
@@ -706,6 +772,12 @@ class PdfEngine:
                 ):
                     if output_page[key] != source_page[key]:
                         raise FidelityError(f"merge changed page {offset + source_index + 1} {key}")
+                if not _resources_equivalent(
+                    source_page["resources"], output_page["resources"]
+                ):
+                    raise FidelityError(
+                        f"merge changed page {offset + source_index + 1} resources"
+                    )
                 expected_internal = [
                     {
                         "target": offset + link["target"] if link["target"] is not None else None,

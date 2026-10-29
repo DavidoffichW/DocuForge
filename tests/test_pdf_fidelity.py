@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pikepdf
 import pytest
+from PIL import Image
 from pypdf import PdfReader, PdfWriter
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfgen import canvas
 
 from docuforge.errors import FidelityError, InvalidDocumentError
 from docuforge.page_commands import initial_page_state
@@ -122,3 +126,20 @@ def test_preexisting_unresolved_link_remains_unresolved(
     result = PdfEngine().materialize(broken, pages)
     internal = inspect_semantics(result.pdf_bytes)["pages"][0]["internal_links"]
     assert {"target": None, "name": "missing-destination"} in internal
+
+
+def test_resource_hash_budget_does_not_block_page_reorder(tmp_path: Path) -> None:
+    output = BytesIO()
+    pdf = canvas.Canvas(output, pagesize=letter, pageCompression=1)
+    for color in ((180, 30, 60), (30, 120, 180), (80, 150, 40)):
+        image_bytes = BytesIO()
+        Image.new("RGB", (500, 400), color).save(image_bytes, format="PNG")
+        image_bytes.seek(0)
+        pdf.drawImage(ImageReader(image_bytes), 50, 250, width=500, height=400)
+        pdf.showPage()
+    pdf.save()
+    source = write_pdf(tmp_path / "image-heavy.pdf", output.getvalue())
+    pages = list(reversed(initial_page_state("version", 3)))
+    result = PdfEngine().materialize(source, pages)
+    assert result.page_count == 3
+    assert result.byte_reproducible is True
