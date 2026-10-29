@@ -4,7 +4,9 @@ import io
 from pathlib import Path
 
 import pytest
+from PIL import Image
 from reportlab.lib.pagesizes import letter
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 from docuforge.config import Settings
@@ -23,12 +25,17 @@ def build_pdf(
     output = io.BytesIO()
     pdf = canvas.Canvas(output, pagesize=letter, pageCompression=1)
     pdf.setTitle(title)
+    image_bytes = io.BytesIO()
+    Image.new("RGB", (8, 8), (27, 95, 122)).save(image_bytes, format="PNG")
+    image_bytes.seek(0)
+    fixture_image = ImageReader(image_bytes)
     for index in range(pages):
         page_number = index + 1
         pdf.bookmarkPage(f"page-{page_number}")
         pdf.addOutlineEntry(f"Section {page_number}", f"page-{page_number}", level=0)
         pdf.setFont("Helvetica", 14)
         pdf.drawString(72, 720, f"Fixture page {page_number}")
+        pdf.drawImage(fixture_image, 500, 700, width=24, height=24)
         if interactive and index == 0:
             pdf.linkURL("https://example.invalid/docuforge", (72, 680, 260, 700), relative=0)
             if pages > 1:

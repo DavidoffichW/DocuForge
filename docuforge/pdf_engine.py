@@ -60,16 +60,49 @@ def _content_sha256(page: Any) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _stream_digest(value: Any) -> str | None:
+RESOURCE_DIGEST_BUDGET = 16 * 1024 * 1024
+
+
+def _stream_digest(
+    value: Any,
+    budget: list[int],
+    *,
+    expected_decoded_bytes: int | None = None,
+) -> str | None:
     try:
         resolved = value.get_object() if hasattr(value, "get_object") else value
+        # Only decode resources whose expanded size is known and fits the
+        # per-document inspection budget.  This keeps image-heavy PDFs from
+        # turning a fidelity check into an unbounded decompression pass.
+        if expected_decoded_bytes is None or expected_decoded_bytes > budget[0]:
+            return None
         data = resolved.get_data()
     except Exception:
         return None
+    if len(data) > budget[0]:
+        return None
+    budget[0] -= len(data)
     return hashlib.sha256(data).hexdigest()
 
 
-def _resource_signature(page: Any) -> dict[str, Any]:
+def _image_decoded_size(value: Any) -> int | None:
+    width = int(value.get("/Width", 0) or 0)
+    height = int(value.get("/Height", 0) or 0)
+    bits = int(value.get("/BitsPerComponent", 1 if value.get("/ImageMask") else 0) or 0)
+    color_space = str(value.get("/ColorSpace", ""))
+    components = {
+        "/DeviceGray": 1,
+        "/DeviceRGB": 3,
+        "/DeviceCMYK": 4,
+    }.get(color_space)
+    if value.get("/ImageMask"):
+        components = 1
+    if not width or not height or not bits or components is None:
+        return None
+    return (width * height * bits * components + 7) // 8
+
+
+def _resource_signature(page: Any, budget: list[int]) -> dict[str, Any]:
     resources = page.get("/Resources") or {}
     try:
         resources = resources.get_object()
@@ -92,7 +125,13 @@ def _resource_signature(page: Any) -> dict[str, Any]:
                 "subtype": str(value.get("/Subtype", "")),
                 "width": int(value.get("/Width", 0) or 0),
                 "height": int(value.get("/Height", 0) or 0),
-                "data_sha256": _stream_digest(value),
+                "color_space": str(value.get("/ColorSpace", "")),
+                "bits_per_component": int(value.get("/BitsPerComponent", 0) or 0),
+                "data_sha256": _stream_digest(
+                    value,
+                    budget,
+                    expected_decoded_bytes=_image_decoded_size(value),
+                ),
             }
         )
     fonts: list[dict[str, Any]] = []
@@ -111,7 +150,7 @@ def _resource_signature(page: Any) -> dict[str, Any]:
                 "name": str(name),
                 "subtype": str(value.get("/Subtype", "")),
                 "base_font": str(value.get("/BaseFont", "")),
-                "to_unicode_sha256": _stream_digest(value.get("/ToUnicode")),
+                "has_to_unicode": value.get("/ToUnicode") is not None,
             }
         )
     return {"xobjects": xobjects, "fonts": fonts}
@@ -123,21 +162,17 @@ def _annotation_signature(annotation: Any) -> dict[str, Any]:
         appearance = appearance.get_object()
     except Exception:
         pass
-    appearance_hashes: list[str] = []
+    appearance_signatures: list[str] = []
     if hasattr(appearance, "items"):
         for _, value in sorted(appearance.items(), key=lambda item: str(item[0])):
-            digest = _stream_digest(value)
-            if digest:
-                appearance_hashes.append(digest)
+            try:
+                states = value.get_object()
+            except Exception:
+                continue
+            if hasattr(states, "items"):
+                appearance_signatures.extend(str(state) for state in sorted(states))
             else:
-                try:
-                    states = value.get_object()
-                    for _, state in sorted(states.items(), key=lambda item: str(item[0])):
-                        digest = _stream_digest(state)
-                        if digest:
-                            appearance_hashes.append(digest)
-                except Exception:
-                    continue
+                appearance_signatures.append(str(states.get("/Subtype", "/Stream")))
     field = annotation
     if "/T" not in field and field.get("/Parent") is not None:
         try:
@@ -154,7 +189,7 @@ def _annotation_signature(annotation: Any) -> dict[str, Any]:
         "field_name": str(field.get("/T", "")),
         "field_type": str(field.get("/FT", "")),
         "field_value": str(field.get("/V", "")),
-        "appearance_sha256": sorted(appearance_hashes),
+        "appearance_structure": sorted(appearance_signatures),
     }
 
 
@@ -224,6 +259,7 @@ def inspect_semantics(source: Path | bytes) -> dict[str, Any]:
             page_references[reference] = index
 
     pages: list[dict[str, Any]] = []
+    resource_digest_budget = [RESOURCE_DIGEST_BUDGET]
     required_named_destinations: set[str] = set()
     for page_index, page in enumerate(reader.pages):
         annotations: Counter[str] = Counter()
@@ -274,7 +310,7 @@ def inspect_semantics(source: Path | bytes) -> dict[str, Any]:
                 "media_box": _box(page, "/MediaBox"),
                 "crop_box": _box(page, "/CropBox"),
                 "content_sha256": _content_sha256(page),
-                "resources": _resource_signature(page),
+                "resources": _resource_signature(page, resource_digest_budget),
                 "annotations": dict(sorted(annotations.items())),
                 "annotation_details": sorted(
                     annotation_details,

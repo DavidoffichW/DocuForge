@@ -27,9 +27,11 @@ def test_reorder_and_rotation_preserve_interactive_structure(
     pages[0]["rotation"] = 90
     result = PdfEngine().materialize(source, pages)
     after = inspect_semantics(result.pdf_bytes)
+    assert before["pages"][0]["resources"]["xobjects"][0]["data_sha256"]
     assert after["pages"][0]["rotation"] == 90
     assert after["pages"][0]["external_links"] == before["pages"][0]["external_links"]
     assert after["pages"][0]["annotations"] == before["pages"][0]["annotations"]
+    assert after["pages"][0]["resources"] == before["pages"][0]["resources"]
     assert after["fields"] == before["fields"]
     assert after["outlines"] == before["outlines"]
     assert result.byte_reproducible is True
