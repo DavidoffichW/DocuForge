@@ -48,7 +48,11 @@ def test_browser_open_view_organize_save_and_reopen(
     page_errors: list[Exception] = []
     page.on("pageerror", lambda error: page_errors.append(error))
     page.goto(live_editor)
-    expect(page.locator("h1")).to_have_text("Open a PDF to begin")
+    expect(page.locator("html")).to_have_attribute("data-theme", "dark")
+    expect(page.locator("h1")).to_have_text("Shape the document,one page at a time.")
+    expect(page.locator(".scope-card")).to_contain_text(
+        "Annotation, OCR, and existing-content editing are intentionally not shown."
+    )
     page.locator("#open-file").set_input_files(
         {
             "name": "browser-fixture.pdf",
@@ -72,6 +76,9 @@ def test_browser_open_view_organize_save_and_reopen(
     page.locator(".thumbnail input").first.check()
     page.locator("#rotate-right").click()
     expect(page.locator("#dirty-marker")).to_be_visible()
+    expect(page.locator("#save-as-button .button-label")).to_have_text(
+        "Save & download"
+    )
     expect(page.locator(".thumbnail-meta").first).to_contain_text("90°")
     page.wait_for_function(
         """() => {
@@ -143,6 +150,9 @@ def test_browser_open_view_organize_save_and_reopen(
     page.locator(".thumbnail input").last.uncheck()
     page.locator(".thumbnail input").nth(1).check()
     page.locator("#delete-pages").click()
+    expect(page.locator("#delete-dialog")).to_be_visible()
+    expect(page.locator("#delete-dialog-title")).to_have_text("Remove 1 page?")
+    page.locator("#delete-dialog button[value='confirm']").click()
     expect(page.locator(".thumbnail")).to_have_count(2)
     expect(page.locator("#viewer .page")).to_have_count(2)
     expect(page.locator("#page-count")).to_have_text("2")
@@ -162,6 +172,8 @@ def test_browser_open_view_organize_save_and_reopen(
 
     page.locator("#save-button").click()
     expect(page.locator("#dirty-marker")).to_be_hidden(timeout=15_000)
+    expect(page.locator("#save-as-button .button-label")).to_have_text("Download PDF")
+    expect(page.locator("#toast")).to_have_class("toast success")
     expect(page.locator("#version-label")).to_contain_text("Version 2")
     expect(page.locator("#viewer .page").first).to_be_visible(timeout=15_000)
     expect(page.locator("#viewer .page")).to_have_count(2)
@@ -187,6 +199,34 @@ def test_browser_open_view_organize_save_and_reopen(
     expect(page.locator("#viewer .page").first).to_be_visible(timeout=15_000)
     expect(page.locator("#viewer .page")).to_have_count(2)
     assert page_errors == []
+
+
+@pytest.mark.browser
+def test_browser_theme_and_import_error_feedback(browser, live_editor: str) -> None:
+    page = browser.new_page(viewport={"width": 1280, "height": 760})
+    page.goto(live_editor)
+    expect(page.locator("#theme-button")).to_have_attribute(
+        "aria-label", "Use light theme"
+    )
+    page.locator("#theme-button").click()
+    expect(page.locator("html")).to_have_attribute("data-theme", "light")
+    expect(page.locator("#theme-button")).to_have_attribute(
+        "aria-label", "Use dark theme"
+    )
+    page.reload()
+    expect(page.locator("html")).to_have_attribute("data-theme", "light")
+
+    page.locator("#open-file").set_input_files(
+        {
+            "name": "not-a-pdf.pdf",
+            "mimeType": "application/pdf",
+            "buffer": b"not a PDF",
+        }
+    )
+    expect(page.locator("#toast")).to_be_visible()
+    expect(page.locator("#toast")).to_have_class("toast error")
+    expect(page.locator("#status-message")).to_contain_text("Import failed")
+    expect(page.locator("#empty-state")).to_be_visible()
 
 
 @pytest.mark.browser

@@ -1,11 +1,13 @@
 # DocuForge
 
-DocuForge is a local, browser-based PDF workspace for opening documents,
-organizing pages, and saving immutable document versions. The editor combines a
+DocuForge is a polished local PDF workspace for viewing documents, organizing
+pages, and saving immutable document versions. Its focused browser interface
+uses a dark ruby and silver-grey visual system with clear document, page, and
+version state. The application combines a
 FastAPI service, SQLite metadata, managed content-addressed storage, pikepdf for
 PDF transformations, and PDF.js for the browser viewer.
 
-The current editor foundation supports:
+Version 0.1.0 supports:
 
 - PDF import and validation with a 256 MiB default upload limit;
 - text selection, document search, PDF links, page navigation, and zoom;
@@ -17,14 +19,22 @@ The current editor foundation supports:
 - fidelity checks that block transformations which would silently lose
   supported links, bookmarks, annotations, form fields, or page content.
 
-Annotations, OCR, existing-content editing, shared-server deployment, and
-collaborative workspaces are not implemented. DocuForge is intended for trusted
-single-user use on the local machine.
+`Save version` persists the current page plan as a new immutable version.
+`Download PDF` downloads the current saved version; when the page plan has
+unsaved changes, the action is relabelled `Save & download` and materializes a
+new version first. Extract downloads only the selected pages and does not alter
+the working document.
+
+Annotations, comments, drawing, OCR, existing-content text or image editing,
+shared-server deployment, and collaborative workspaces are not implemented.
+DocuForge is a page-operations editor intended for trusted single-user use on
+the local machine, not a general replacement for a full PDF authoring suite.
 
 ## Requirements
 
 - CPython 3.11 or newer
-- A current Chromium, Firefox, or Edge browser
+- A current desktop browser supported by PDF.js (automated browser qualification
+  uses Chromium)
 
 ## Install and run
 
@@ -52,6 +62,10 @@ Unsupported action types block the affected transformation. Decoded
 image-resource hashing is capped at 1 MiB per semantic inspection; larger or
 unsupported image encodings are compared by their declared structure rather
 than by decoding every pixel.
+
+The interface defaults to its dark theme and also provides a persistent light
+theme. Motion is limited to short state and continuity cues and follows the
+operating system's reduced-motion preference.
 
 ## Development
 

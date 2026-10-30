@@ -26,6 +26,7 @@ const state = {
   thumbnailTasks: new Set(),
   viewerGeneration: 0,
   mutationQueue: Promise.resolve(),
+  draggedPageId: null,
 };
 
 const eventBus = new EventBus();
@@ -48,10 +49,13 @@ function status(message) { $("#status-message").textContent = message; }
 function busy(active, message = "Working…") {
   $("#progress").hidden = !active;
   $("#progress output").textContent = message;
+  document.body.setAttribute("aria-busy", String(active));
 }
-function toast(message) {
+function toast(message, kind = "info") {
   const element = $("#toast");
-  element.textContent = message;
+  element.querySelector(".toast-message").textContent = message;
+  element.classList.remove("success", "error");
+  if (kind !== "info") element.classList.add(kind);
   element.hidden = false;
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => { element.hidden = true; }, 5000);
@@ -84,7 +88,7 @@ async function openFile(file) {
     await openDocument(imported.document.id, imported.version.id);
     status(`Imported ${imported.pdf.page_count} pages`);
     await refreshDocuments();
-  } catch (error) { toast(error.message); status("Import failed"); }
+  } catch (error) { toast(error.message, "error"); status("Import failed · choose a valid PDF to try again"); }
   finally { busy(false); $("#open-file").value = ""; }
 }
 
@@ -103,7 +107,7 @@ async function openDocument(documentId, versionId = null) {
     await loadPdf(`/api/versions/${version.id}/content`);
     await renderSession({ focusPageId: session.pages[0]?.id, resetScale: true });
     status(`Opened ${document.title}`);
-  } catch (error) { toast(error.message); status("Open failed"); }
+  } catch (error) { toast(error.message, "error"); status("Open failed · the previous workspace state is unchanged"); }
   finally { busy(false); }
 }
 
@@ -234,6 +238,11 @@ async function renderSession(viewOptions = {}) {
   $("#page-count").textContent = session.pages.length;
   $("#page-number").max = String(session.pages.length);
   $("#version-label").textContent = `Version ${state.version.version_number} · rev ${session.revision}`;
+  const downloadLabel = $("#save-as-button .button-label");
+  downloadLabel.textContent = session.dirty ? "Save & download" : "Download PDF";
+  $("#save-as-button").title = session.dirty
+    ? "Save a new immutable version, then download it"
+    : "Download the current saved version";
   const enabled = Boolean(state.pdf);
   all("#save-button, #save-as-button, #undo-button, #redo-button, #previous-page, #next-page, #page-number, #zoom-out, #zoom-in, #zoom-select, #search-field, #search-button").forEach((element) => { element.disabled = !enabled; });
   $("#save-button").disabled = !session.dirty;
@@ -263,6 +272,8 @@ function renderThumbnails() {
     const item = document.createElement("div");
     item.className = `thumbnail${state.selected.has(page.id) ? " selected" : ""}`;
     item.draggable = true;
+    item.tabIndex = 0;
+    item.setAttribute("aria-label", `Page ${index + 1}, source page ${page.source_index + 1}, rotation ${page.rotation} degrees`);
     item.dataset.pageId = page.id;
     item.dataset.sourceIndex = String(page.source_index);
     item.dataset.position = String(index);
@@ -281,20 +292,36 @@ function renderThumbnails() {
       viewer.currentPageNumber = index + 1;
       updateProperties(index);
     });
-    item.addEventListener("dragstart", () => { item.classList.add("dragging"); item.dataset.dragging = "true"; });
-    item.addEventListener("dragend", () => { item.classList.remove("dragging"); delete item.dataset.dragging; all(".drop-target").forEach((el) => el.classList.remove("drop-target")); });
+    item.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      viewer.currentPageNumber = index + 1;
+      updateProperties(index);
+    });
+    item.addEventListener("dragstart", (event) => {
+      state.draggedPageId = page.id;
+      item.classList.add("dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", page.id);
+    });
+    item.addEventListener("dragend", () => {
+      state.draggedPageId = null;
+      item.classList.remove("dragging");
+      all(".drop-target").forEach((el) => el.classList.remove("drop-target"));
+    });
     item.addEventListener("dragover", (event) => { event.preventDefault(); item.classList.add("drop-target"); });
     item.addEventListener("dragleave", () => item.classList.remove("drop-target"));
     item.addEventListener("drop", async (event) => {
       event.preventDefault();
-      const source = $(".thumbnail[data-dragging='true']");
-      if (!source || source === item) return;
-      await command({ kind: "move", page_id: source.dataset.pageId, to_index: Number(item.dataset.position) });
+      const pageId = event.dataTransfer.getData("text/plain") || state.draggedPageId;
+      if (!pageId || pageId === item.dataset.pageId) return;
+      await command({ kind: "move", page_id: pageId, to_index: Number(item.dataset.position) });
     });
     list.append(item);
     observer.observe(item);
   });
   updateProperties(0);
+  markCurrentThumbnail(viewer.currentPageNumber || 1);
 }
 
 function queueThumbnail(element, generation) {
@@ -347,6 +374,18 @@ function updateSelectionControls() {
   const selected = state.selected.size > 0;
   all("#rotate-left, #rotate-right, #delete-pages, #extract-pages").forEach((element) => { element.disabled = !selected; });
   $("#delete-pages").disabled = !selected || state.selected.size >= (state.session?.pages.length || 0);
+  const count = $("#selection-count");
+  count.textContent = selected ? `${state.selected.size} selected` : "No selection";
+  count.classList.toggle("active", selected);
+}
+
+function markCurrentThumbnail(pageNumber) {
+  all(".thumbnail").forEach((element, index) => {
+    const current = index + 1 === pageNumber;
+    element.classList.toggle("current", current);
+    if (current) element.setAttribute("aria-current", "page");
+    else element.removeAttribute("aria-current");
+  });
 }
 
 function updateProperties(index) {
@@ -370,7 +409,7 @@ async function command(payload) {
       for (const id of [...state.selected]) if (!state.session.pages.some((page) => page.id === id)) state.selected.delete(id);
       await renderSession({ focusPageId: focus.pageId, fallbackIndex: focus.index });
       status("Page plan updated; save to materialize the version");
-    } catch (error) { toast(error.message); }
+    } catch (error) { toast(error.message, "error"); status("Page command failed · no changes were applied"); }
     finally { busy(false); }
   });
 }
@@ -385,7 +424,7 @@ async function runRevisionAction(action) {
       });
       await renderSession({ focusPageId: focus.pageId, fallbackIndex: focus.index });
       status(action === "undo" ? "Last page command undone" : "Page command restored");
-    } catch (error) { toast(error.message); }
+    } catch (error) { toast(error.message, "error"); status(`${action === "undo" ? "Undo" : "Redo"} failed · document state is unchanged`); }
     finally { busy(false); }
   });
 }
@@ -410,7 +449,11 @@ async function save(downloadAfter = false) {
       await renderSession({ focusPageId: state.session.pages[0]?.id, resetScale: true });
       status(`Saved immutable version ${state.version.version_number}`);
       if (downloadAfter) download(`/api/versions/${state.version.id}/content`, state.document.title);
-    } catch (error) { toast(error.message); status("Save blocked"); }
+      const saveButton = $("#save-button");
+      saveButton.classList.remove("save-complete");
+      requestAnimationFrame(() => saveButton.classList.add("save-complete"));
+      toast(downloadAfter ? "Version saved and download started" : `Version ${state.version.version_number} saved`, "success");
+    } catch (error) { toast(error.message, "error"); status("Save blocked · the previous version remains available"); }
     finally { busy(false); }
   });
 }
@@ -425,7 +468,7 @@ async function extractSelected() {
       });
       download(`/api/artifacts/${result.artifact.id}/content`, "extracted-pages.pdf");
       status("Extracted pages without changing the document");
-    } catch (error) { toast(error.message); }
+    } catch (error) { toast(error.message, "error"); status("Extraction failed · the document was not changed"); }
     finally { busy(false); }
   });
 }
@@ -433,6 +476,28 @@ async function extractSelected() {
 function download(url, filename) {
   const anchor = document.createElement("a");
   anchor.href = url; anchor.download = filename; document.body.append(anchor); anchor.click(); anchor.remove();
+}
+
+function downloadCurrent() {
+  if (!state.version) return;
+  if (state.session?.dirty) save(true);
+  else {
+    download(`/api/versions/${state.version.id}/content`, state.document.title);
+    status(`Downloading saved version ${state.version.version_number}`);
+    toast("Download started", "success");
+  }
+}
+
+function confirmDelete() {
+  const count = state.selected.size;
+  if (!count) return Promise.resolve(false);
+  const dialog = $("#delete-dialog");
+  $("#delete-dialog-title").textContent = `Remove ${count} ${count === 1 ? "page" : "pages"}?`;
+  $("#delete-dialog-message").textContent = "The pending page plan will change immediately. You can undo this command before or after saving a version.";
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => resolve(dialog.returnValue === "confirm"), { once: true });
+    dialog.showModal();
+  });
 }
 
 async function refreshDocuments() {
@@ -443,18 +508,19 @@ async function refreshDocuments() {
     for (const document of documents) {
       const card = window.document.createElement("button");
       card.className = "document-card";
-      card.innerHTML = `<strong></strong><small></small>`;
+      card.innerHTML = `<span><strong></strong><small></small></span>`;
       card.querySelector("strong").textContent = document.title;
       card.querySelector("small").textContent = `${document.page_count} pages · latest version`;
       card.addEventListener("click", () => openDocument(document.id, document.latest_version_id));
       list.append(card);
     }
-  } catch (error) { toast(error.message); }
+  } catch (error) { toast(error.message, "error"); }
 }
 
 eventBus.on("pagesinit", () => { viewer.currentScaleValue = "page-width"; });
 eventBus.on("pagechanging", ({ pageNumber }) => {
   $("#page-number").value = pageNumber;
+  markCurrentThumbnail(pageNumber);
   if (pageNumber >= 1 && pageNumber <= (state.session?.pages.length || 0)) {
     updateProperties(pageNumber - 1);
   }
@@ -463,7 +529,7 @@ eventBus.on("pagesloaded", ({ pagesCount }) => { $("#page-count").textContent = 
 
 $("#open-file").addEventListener("change", (event) => openFile(event.target.files[0]));
 $("#save-button").addEventListener("click", () => save(false));
-$("#save-as-button").addEventListener("click", () => state.session?.dirty ? save(true) : download(`/api/versions/${state.version.id}/content`, state.document.title));
+$("#save-as-button").addEventListener("click", downloadCurrent);
 $("#undo-button").addEventListener("click", () => runRevisionAction("undo"));
 $("#redo-button").addEventListener("click", () => runRevisionAction("redo"));
 $("#previous-page").addEventListener("click", () => viewer.previousPage());
@@ -476,22 +542,47 @@ $("#search-button").addEventListener("click", () => eventBus.dispatch("find", { 
 $("#search-field").addEventListener("keydown", (event) => { if (event.key === "Enter") $("#search-button").click(); });
 $("#rotate-left").addEventListener("click", () => command({ kind: "rotate", page_ids: [...state.selected], delta: -90 }));
 $("#rotate-right").addEventListener("click", () => command({ kind: "rotate", page_ids: [...state.selected], delta: 90 }));
-$("#delete-pages").addEventListener("click", async () => command({ kind: "delete", page_ids: [...state.selected] }));
+$("#delete-pages").addEventListener("click", async () => {
+  if (await confirmDelete()) await command({ kind: "delete", page_ids: [...state.selected] });
+});
 $("#extract-pages").addEventListener("click", extractSelected);
 $("#refresh-documents").addEventListener("click", refreshDocuments);
 $("#theme-button").addEventListener("click", () => {
   const root = document.documentElement;
-  root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark";
+  setTheme(root.dataset.theme === "dark" ? "light" : "dark");
 });
 all(".tab").forEach((tab) => tab.addEventListener("click", () => {
-  all(".tab").forEach((item) => item.classList.toggle("active", item === tab));
-  all(".panel-body").forEach((panel) => panel.classList.toggle("active", panel.id === tab.dataset.panel));
+  all(".tab").forEach((item) => {
+    const active = item === tab;
+    item.classList.toggle("active", active);
+    item.setAttribute("aria-selected", String(active));
+  });
+  all(".panel-body").forEach((panel) => {
+    const active = panel.id === tab.dataset.panel;
+    panel.classList.toggle("active", active);
+    panel.hidden = !active;
+  });
 }));
 window.addEventListener("keydown", (event) => {
   if (!(event.ctrlKey || event.metaKey)) return;
-  if (event.key.toLowerCase() === "s") { event.preventDefault(); save(event.shiftKey); }
+  if (event.key.toLowerCase() === "s") {
+    event.preventDefault();
+    if (event.shiftKey) downloadCurrent();
+    else if (state.session?.dirty) save(false);
+    else status("No unsaved page changes");
+  }
   if (event.key.toLowerCase() === "z") { event.preventDefault(); runRevisionAction(event.shiftKey ? "redo" : "undo"); }
 });
+
+function setTheme(theme) {
+  const value = theme === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = value;
+  $("#theme-button").setAttribute("aria-label", value === "dark" ? "Use light theme" : "Use dark theme");
+  try { localStorage.setItem("docuforge-theme", value); } catch (_) { /* local preference is optional */ }
+}
+
+$(".toast-close").addEventListener("click", () => { $("#toast").hidden = true; });
+try { setTheme(localStorage.getItem("docuforge-theme") || "dark"); } catch (_) { setTheme("dark"); }
 
 refreshDocuments();
 status("Ready · local workspace");
