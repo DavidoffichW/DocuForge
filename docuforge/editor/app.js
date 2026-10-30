@@ -54,6 +54,7 @@ function busy(active, message = "Working…") {
 function toast(message, kind = "info") {
   const element = $("#toast");
   element.querySelector(".toast-message").textContent = message;
+  element.querySelector(".toast-icon use").setAttribute("href", kind === "error" ? "#icon-error" : "#icon-success");
   element.classList.remove("success", "error");
   if (kind !== "info") element.classList.add(kind);
   element.hidden = false;
@@ -237,10 +238,9 @@ async function renderSession(viewOptions = {}) {
   $("#dirty-marker").hidden = !session.dirty;
   $("#page-count").textContent = session.pages.length;
   $("#page-number").max = String(session.pages.length);
-  $("#version-label").textContent = `Version ${state.version.version_number} · rev ${session.revision}`;
-  const downloadLabel = $("#save-as-button .button-label");
-  downloadLabel.textContent = session.dirty ? "Save & download" : "Download PDF";
-  $("#save-as-button").title = session.dirty
+  const downloadLabel = session.dirty ? "Save and download" : "Download PDF";
+  $("#save-as-button").setAttribute("aria-label", downloadLabel);
+  $("#save-as-button").dataset.tooltip = session.dirty
     ? "Save a new immutable version, then download it"
     : "Download the current saved version";
   const enabled = Boolean(state.pdf);
@@ -273,14 +273,14 @@ function renderThumbnails() {
     item.className = `thumbnail${state.selected.has(page.id) ? " selected" : ""}`;
     item.draggable = true;
     item.tabIndex = 0;
-    item.setAttribute("aria-label", `Page ${index + 1}, source page ${page.source_index + 1}, rotation ${page.rotation} degrees`);
+    item.setAttribute("aria-label", `Page ${index + 1}${page.rotation ? `, rotated ${page.rotation} degrees` : ""}`);
     item.dataset.pageId = page.id;
     item.dataset.sourceIndex = String(page.source_index);
     item.dataset.position = String(index);
     item.innerHTML = `
       <input type="checkbox" aria-label="Select page ${index + 1}" ${state.selected.has(page.id) ? "checked" : ""}>
       <div><div class="thumbnail-placeholder">Page ${index + 1}</div>
-      <div class="thumbnail-meta"><span>${index + 1}</span><span>${page.rotation}°</span></div></div>`;
+      <div class="thumbnail-meta"><span>${index + 1}</span></div></div>`;
     item.querySelector("input").addEventListener("change", (event) => {
       event.stopPropagation();
       event.target.checked ? state.selected.add(page.id) : state.selected.delete(page.id);
@@ -290,13 +290,11 @@ function renderThumbnails() {
     item.addEventListener("click", (event) => {
       if (event.target.matches("input")) return;
       viewer.currentPageNumber = index + 1;
-      updateProperties(index);
     });
     item.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       viewer.currentPageNumber = index + 1;
-      updateProperties(index);
     });
     item.addEventListener("dragstart", (event) => {
       state.draggedPageId = page.id;
@@ -320,7 +318,6 @@ function renderThumbnails() {
     list.append(item);
     observer.observe(item);
   });
-  updateProperties(0);
   markCurrentThumbnail(viewer.currentPageNumber || 1);
 }
 
@@ -374,9 +371,6 @@ function updateSelectionControls() {
   const selected = state.selected.size > 0;
   all("#rotate-left, #rotate-right, #delete-pages, #extract-pages").forEach((element) => { element.disabled = !selected; });
   $("#delete-pages").disabled = !selected || state.selected.size >= (state.session?.pages.length || 0);
-  const count = $("#selection-count");
-  count.textContent = selected ? `${state.selected.size} selected` : "No selection";
-  count.classList.toggle("active", selected);
 }
 
 function markCurrentThumbnail(pageNumber) {
@@ -386,14 +380,6 @@ function markCurrentThumbnail(pageNumber) {
     if (current) element.setAttribute("aria-current", "page");
     else element.removeAttribute("aria-current");
   });
-}
-
-function updateProperties(index) {
-  const page = state.session?.pages[index];
-  $("#property-page").textContent = page ? String(index + 1) : "—";
-  $("#property-source").textContent = page ? String(page.source_index + 1) : "—";
-  $("#property-rotation").textContent = page ? `${page.rotation}°` : "—";
-  $("#property-id").textContent = page ? page.id : "—";
 }
 
 async function command(payload) {
@@ -521,13 +507,12 @@ eventBus.on("pagesinit", () => { viewer.currentScaleValue = "page-width"; });
 eventBus.on("pagechanging", ({ pageNumber }) => {
   $("#page-number").value = pageNumber;
   markCurrentThumbnail(pageNumber);
-  if (pageNumber >= 1 && pageNumber <= (state.session?.pages.length || 0)) {
-    updateProperties(pageNumber - 1);
-  }
 });
 eventBus.on("pagesloaded", ({ pagesCount }) => { $("#page-count").textContent = state.session?.pages.length ?? pagesCount; });
 
 $("#open-file").addEventListener("change", (event) => openFile(event.target.files[0]));
+$("#open-button").addEventListener("click", () => $("#open-file").click());
+$("#empty-open-button").addEventListener("click", () => $("#open-file").click());
 $("#save-button").addEventListener("click", () => save(false));
 $("#save-as-button").addEventListener("click", downloadCurrent);
 $("#undo-button").addEventListener("click", () => runRevisionAction("undo"));
@@ -538,8 +523,32 @@ $("#page-number").addEventListener("change", (event) => { viewer.currentPageNumb
 $("#zoom-select").addEventListener("change", (event) => { viewer.currentScaleValue = event.target.value; });
 $("#zoom-in").addEventListener("click", () => viewer.increaseScale({ steps: 1 }));
 $("#zoom-out").addEventListener("click", () => viewer.decreaseScale({ steps: 1 }));
-$("#search-button").addEventListener("click", () => eventBus.dispatch("find", { source: window, type: "", query: $("#search-field").value, phraseSearch: true, highlightAll: true, findPrevious: false }));
-$("#search-field").addEventListener("keydown", (event) => { if (event.key === "Enter") $("#search-button").click(); });
+function closeSearch() {
+  const tools = $("#search-tools");
+  const field = $("#search-field");
+  tools.classList.remove("expanded");
+  $("#search-button").setAttribute("aria-expanded", "false");
+  field.value = "";
+  field.hidden = true;
+  eventBus.dispatch("find", { source: window, type: "", query: "", phraseSearch: true, highlightAll: true, findPrevious: false });
+}
+
+$("#search-button").addEventListener("click", () => {
+  const tools = $("#search-tools");
+  const field = $("#search-field");
+  if (!tools.classList.contains("expanded")) {
+    tools.classList.add("expanded");
+    field.hidden = false;
+    $("#search-button").setAttribute("aria-expanded", "true");
+    requestAnimationFrame(() => field.focus());
+    return;
+  }
+  eventBus.dispatch("find", { source: window, type: "", query: field.value, phraseSearch: true, highlightAll: true, findPrevious: false });
+});
+$("#search-field").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") $("#search-button").click();
+  if (event.key === "Escape") closeSearch();
+});
 $("#rotate-left").addEventListener("click", () => command({ kind: "rotate", page_ids: [...state.selected], delta: -90 }));
 $("#rotate-right").addEventListener("click", () => command({ kind: "rotate", page_ids: [...state.selected], delta: 90 }));
 $("#delete-pages").addEventListener("click", async () => {
@@ -577,7 +586,9 @@ window.addEventListener("keydown", (event) => {
 function setTheme(theme) {
   const value = theme === "light" ? "light" : "dark";
   document.documentElement.dataset.theme = value;
-  $("#theme-button").setAttribute("aria-label", value === "dark" ? "Use light theme" : "Use dark theme");
+  const label = value === "dark" ? "Use light theme" : "Use dark theme";
+  $("#theme-button").setAttribute("aria-label", label);
+  $("#theme-button").dataset.tooltip = label;
   try { localStorage.setItem("docuforge-theme", value); } catch (_) { /* local preference is optional */ }
 }
 

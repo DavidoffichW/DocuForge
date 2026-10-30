@@ -49,10 +49,9 @@ def test_browser_open_view_organize_save_and_reopen(
     page.on("pageerror", lambda error: page_errors.append(error))
     page.goto(live_editor)
     expect(page.locator("html")).to_have_attribute("data-theme", "dark")
-    expect(page.locator("h1")).to_have_text("Shape the document,one page at a time.")
-    expect(page.locator(".scope-card")).to_contain_text(
-        "Annotation, OCR, and existing-content editing are intentionally not shown."
-    )
+    expect(page.locator(".brand-mark")).to_have_text("D")
+    expect(page.locator("h1")).to_have_text("Open a PDF")
+    expect(page.locator("#open-button")).to_have_attribute("aria-label", "Open PDF")
     page.locator("#open-file").set_input_files(
         {
             "name": "browser-fixture.pdf",
@@ -64,6 +63,18 @@ def test_browser_open_view_organize_save_and_reopen(
     expect(page.locator("#viewer .page").first).to_be_visible(timeout=15_000)
     expect(page.locator("#viewer .textLayer span").first).to_be_attached(timeout=15_000)
     expect(page.locator(".thumbnail")).to_have_count(3)
+    expect(page.locator(".right-panel")).to_have_count(0)
+    expect(page.locator("footer")).to_have_count(0)
+    for removed_text in (
+        "Current document",
+        "Page editor status",
+        "Transform source pages without rebuilding",
+        "Select pages, then rotate, delete, or extract",
+        "No selection",
+        "Local-first",
+        "Same-origin guarded",
+    ):
+        expect(page.get_by_text(removed_text, exact=True)).to_have_count(0)
 
     first_page = page.locator("#viewer .page").first
     expect(first_page.locator(".textLayer")).to_contain_text("Fixture page 1")
@@ -76,10 +87,12 @@ def test_browser_open_view_organize_save_and_reopen(
     page.locator(".thumbnail input").first.check()
     page.locator("#rotate-right").click()
     expect(page.locator("#dirty-marker")).to_be_visible()
-    expect(page.locator("#save-as-button .button-label")).to_have_text(
-        "Save & download"
+    expect(page.locator("#save-as-button")).to_have_attribute(
+        "aria-label", "Save and download"
     )
-    expect(page.locator(".thumbnail-meta").first).to_contain_text("90°")
+    expect(page.locator(".thumbnail").first).to_have_attribute(
+        "aria-label", "Page 1, rotated 90 degrees"
+    )
     page.wait_for_function(
         """() => {
             const canvas = document.querySelector('#viewer .page canvas');
@@ -88,7 +101,7 @@ def test_browser_open_view_organize_save_and_reopen(
     )
 
     page.locator("#undo-button").click()
-    expect(page.locator(".thumbnail-meta").first).to_contain_text("0°")
+    expect(page.locator(".thumbnail").first).to_have_attribute("aria-label", "Page 1")
     page.wait_for_function(
         """() => {
             const canvas = document.querySelector('#viewer .page canvas');
@@ -96,20 +109,26 @@ def test_browser_open_view_organize_save_and_reopen(
         }"""
     )
     page.locator("#redo-button").click()
-    expect(page.locator(".thumbnail-meta").first).to_contain_text("90°")
+    expect(page.locator(".thumbnail").first).to_have_attribute(
+        "aria-label", "Page 1, rotated 90 degrees"
+    )
 
     first = page.locator(".thumbnail").first
     last = page.locator(".thumbnail").last
     first.drag_to(last)
-    expect(page.locator(".thumbnail-meta").last).to_contain_text("90°")
+    expect(page.locator(".thumbnail").last).to_have_attribute(
+        "aria-label", "Page 3, rotated 90 degrees"
+    )
     page.locator("#page-number").fill("1")
     page.locator("#page-number").dispatch_event("change")
     expect(page.locator("#viewer .page").first.locator(".textLayer")).to_contain_text(
         "Fixture page 2"
     )
 
-    page.locator("#search-field").fill("Fixture page 1")
     page.locator("#search-button").click()
+    expect(page.locator("#search-field")).to_be_visible()
+    page.locator("#search-field").fill("Fixture page 1")
+    page.locator("#search-field").press("Enter")
     expect(page.locator("#page-number")).to_have_value("3", timeout=15_000)
     edited_page = page.locator("#viewer .page").nth(2)
     expect(edited_page.locator(".textLayer")).to_contain_text("Fixture page 1")
@@ -138,14 +157,18 @@ def test_browser_open_view_organize_save_and_reopen(
     assert "Fixture page 2" in selection["textContent"]
 
     page.locator("#undo-button").click()
-    expect(page.locator(".thumbnail-meta").first).to_contain_text("90°")
+    expect(page.locator(".thumbnail").first).to_have_attribute(
+        "aria-label", "Page 1, rotated 90 degrees"
+    )
     page.locator("#page-number").fill("1")
     page.locator("#page-number").dispatch_event("change")
     expect(page.locator("#viewer .page").first.locator(".textLayer")).to_contain_text(
         "Fixture page 1"
     )
     page.locator("#redo-button").click()
-    expect(page.locator(".thumbnail-meta").last).to_contain_text("90°")
+    expect(page.locator(".thumbnail").last).to_have_attribute(
+        "aria-label", "Page 3, rotated 90 degrees"
+    )
 
     page.locator(".thumbnail input").last.uncheck()
     page.locator(".thumbnail input").nth(1).check()
@@ -168,13 +191,14 @@ def test_browser_open_view_organize_save_and_reopen(
             document.querySelector('#rotate-left').click();
         }"""
     )
-    expect(page.locator(".thumbnail-meta").first).to_contain_text("0°")
+    expect(page.locator(".thumbnail").first).to_have_attribute("aria-label", "Page 1")
 
     page.locator("#save-button").click()
     expect(page.locator("#dirty-marker")).to_be_hidden(timeout=15_000)
-    expect(page.locator("#save-as-button .button-label")).to_have_text("Download PDF")
+    expect(page.locator("#save-as-button")).to_have_attribute(
+        "aria-label", "Download PDF"
+    )
     expect(page.locator("#toast")).to_have_class("toast success")
-    expect(page.locator("#version-label")).to_contain_text("Version 2")
     expect(page.locator("#viewer .page").first).to_be_visible(timeout=15_000)
     expect(page.locator("#viewer .page")).to_have_count(2)
     expect(page.locator("#viewer .page").first.locator(".textLayer")).to_contain_text(
@@ -195,7 +219,6 @@ def test_browser_open_view_organize_save_and_reopen(
     page.locator(".tab[data-panel='documents-panel']").click()
     expect(page.locator(".document-card")).to_have_count(1)
     page.locator(".document-card").click()
-    expect(page.locator("#version-label")).to_contain_text("Version 2")
     expect(page.locator("#viewer .page").first).to_be_visible(timeout=15_000)
     expect(page.locator("#viewer .page")).to_have_count(2)
     assert page_errors == []
@@ -205,6 +228,19 @@ def test_browser_open_view_organize_save_and_reopen(
 def test_browser_theme_and_import_error_feedback(browser, live_editor: str) -> None:
     page = browser.new_page(viewport={"width": 1280, "height": 760})
     page.goto(live_editor)
+    expect(page.locator("#progress")).to_be_hidden()
+    expect(page.locator("#toast")).to_be_hidden()
+    open_button = page.locator("#open-button")
+    open_button.hover()
+    page.wait_for_timeout(200)
+    assert open_button.evaluate(
+        "(element) => getComputedStyle(element, '::after').opacity"
+    ) == "1"
+    open_button.focus()
+    page.wait_for_timeout(200)
+    assert open_button.evaluate(
+        "(element) => getComputedStyle(element, '::after').opacity"
+    ) == "1"
     expect(page.locator("#theme-button")).to_have_attribute(
         "aria-label", "Use light theme"
     )

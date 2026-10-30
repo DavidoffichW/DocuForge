@@ -11,6 +11,15 @@ licensed under the Apache License, Version 2.0. The bundled license text is in
 
 Source and release information: <https://github.com/mozilla/pdf.js/releases/tag/v4.10.38>
 
+## Lucide Icons 1.65.0
+
+The browser workspace embeds selected SVG paths from Lucide Icons 1.65.0.
+Lucide is licensed under the ISC License; icons derived from Feather retain
+the MIT terms reproduced in the upstream license. The complete license text
+is retained at `docuforge/editor/vendor/lucide/LICENSE`.
+
+Source and release information: <https://github.com/lucide-icons/lucide/releases/tag/1.65.0>
+
 ## pikepdf and qpdf
 
 DocuForge uses pikepdf under the Mozilla Public License 2.0. Official pikepdf

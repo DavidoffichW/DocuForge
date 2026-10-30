@@ -4,139 +4,119 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark light">
-    <meta name="theme-color" content="#171316">
+    <meta name="theme-color" content="#17181d">
     <title>DocuForge · Local PDF workspace</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%238d1738'/%3E%3Cpath d='M9 8h7.5a8 8 0 0 1 0 16H9V8Zm5 4v8h2.3a4 4 0 0 0 0-8H14Z' fill='white'/%3E%3C/svg%3E">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%238e1238'/%3E%3Cpath d='M9 8h7.5a8 8 0 0 1 0 16H9V8Zm5 4v8h2.3a4 4 0 0 0 0-8H14Z' fill='white'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="/assets/vendor/pdfjs/web/pdf_viewer.css">
     <link rel="stylesheet" href="/assets/app.css">
   </head>
   <body>
+    <!-- Lucide 1.65.0 icons, ISC license; see vendor/lucide/LICENSE. -->
     <svg class="icon-sprite" aria-hidden="true">
-      <symbol id="icon-open" viewBox="0 0 24 24"><path d="M3.5 7.5h6l2-2h9v13h-17zM3.5 9.5h17"/></symbol>
-      <symbol id="icon-save" viewBox="0 0 24 24"><path d="M5 4.5h12.5l2 2v13H5zM8 4.5v6h8v-6M8 16h8"/></symbol>
-      <symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 4v11m-4-4 4 4 4-4M5 19.5h14"/></symbol>
-      <symbol id="icon-undo" viewBox="0 0 24 24"><path d="m9 7-5 5 5 5M5 12h8a6 6 0 0 1 6 6"/></symbol>
-      <symbol id="icon-redo" viewBox="0 0 24 24"><path d="m15 7 5 5-5 5m4-5h-8a6 6 0 0 0-6 6"/></symbol>
-      <symbol id="icon-chevron-left" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
-      <symbol id="icon-chevron-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
-      <symbol id="icon-minus" viewBox="0 0 24 24"><path d="M6 12h12"/></symbol>
-      <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></symbol>
-      <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 4.5 4.5"/></symbol>
-      <symbol id="icon-theme" viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 1 0 0 17V3.5Z"/><circle cx="12" cy="8" r="1"/><circle cx="12" cy="16" r="1"/></symbol>
-      <symbol id="icon-rotate-left" viewBox="0 0 24 24"><path d="M5 8V3m0 5h5M5.5 8a8 8 0 1 1-1 7"/></symbol>
-      <symbol id="icon-rotate-right" viewBox="0 0 24 24"><path d="M19 8V3m0 5h-5m4.5 0a8 8 0 1 0 1 7"/></symbol>
-      <symbol id="icon-trash" viewBox="0 0 24 24"><path d="M5 7h14M9 7V4.5h6V7m-8 0 1 13h8l1-13M10 10v6m4-6v6"/></symbol>
-      <symbol id="icon-extract" viewBox="0 0 24 24"><path d="M4 5h10v14H4zM14 9h6v10h-6m2-7 3-3m0 0v3m0-3h-3"/></symbol>
-      <symbol id="icon-pages" viewBox="0 0 24 24"><path d="M7 3.5h10v14H7zM4 6.5v14h10"/></symbol>
-      <symbol id="icon-library" viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 9h16M8 9v10"/></symbol>
-      <symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M19 7V3m0 4h-4M18.5 7a8 8 0 1 0 1 7"/></symbol>
-      <symbol id="icon-shield" viewBox="0 0 24 24"><path d="m12 3 7 3v5c0 4.7-2.8 8-7 10-4.2-2-7-5.3-7-10V6zM9 12l2 2 4-4"/></symbol>
-      <symbol id="icon-close" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></symbol>
+      <symbol id="icon-open" viewBox="0 0 24 24"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></symbol>
+      <symbol id="icon-save" viewBox="0 0 24 24"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/></symbol>
+      <symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></symbol>
+      <symbol id="icon-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11"/></symbol>
+      <symbol id="icon-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H13"/></symbol>
+      <symbol id="icon-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+      <symbol id="icon-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+      <symbol id="icon-zoom-out" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35M8 11h6"/></symbol>
+      <symbol id="icon-zoom-in" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35M11 8v6M8 11h6"/></symbol>
+      <symbol id="icon-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></symbol>
+      <symbol id="icon-theme" viewBox="0 0 24 24"><path d="M12 2v2"/><path d="M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715"/><path d="M16 12a4 4 0 0 0-4-4M19 5l-1.256 1.256M20 12h2"/></symbol>
+      <symbol id="icon-rotate-left" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+      <symbol id="icon-rotate-right" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
+      <symbol id="icon-extract" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5M12 18v-6m-3 3 3 3 3-3"/></symbol>
+      <symbol id="icon-trash" viewBox="0 0 24 24"><path d="M10 11v6M14 11v6M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+      <symbol id="icon-pages" viewBox="0 0 24 24"><path d="M7 2h10M5 6h14"/><rect width="18" height="12" x="3" y="10" rx="2"/></symbol>
+      <symbol id="icon-library" viewBox="0 0 24 24"><rect width="8" height="18" x="3" y="3" rx="1"/><path d="M7 3v18M20.4 18.9c.2.5-.1 1.1-.6 1.3l-1.9.7c-.5.2-1.1-.1-1.3-.6L11.1 5.1c-.2-.5.1-1.1.6-1.3l1.9-.7c.5-.2 1.1.1 1.3.6Z"/></symbol>
+      <symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5"/></symbol>
+      <symbol id="icon-close" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+      <symbol id="icon-success" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 9-5.5 5.5L8 12"/></symbol>
+      <symbol id="icon-error" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></symbol>
     </svg>
 
     <header class="app-header">
       <div class="titlebar">
-        <div class="brand" aria-label="DocuForge local PDF workspace">
+        <div class="brand" aria-label="DocuForge">
           <span class="brand-mark" aria-hidden="true"><span>D</span></span>
-          <span class="brand-copy"><strong>DocuForge</strong><small>PDF workspace</small></span>
-        </div>
-        <div class="file-actions" aria-label="Document actions">
-          <label class="primary-button" for="open-file" title="Open a PDF from this computer"><svg class="icon"><use href="#icon-open"/></svg><span>Open PDF</span></label>
-          <input id="open-file" type="file" accept="application/pdf,.pdf" hidden>
-          <button id="save-button" class="button-emphasis" disabled title="Save an immutable version (Ctrl+S)"><svg class="icon"><use href="#icon-save"/></svg><span>Save version</span><kbd>Ctrl S</kbd></button>
-          <button id="save-as-button" disabled title="Download the current version"><svg class="icon"><use href="#icon-download"/></svg><span class="button-label">Download PDF</span></button>
-        </div>
-        <div class="document-identity" aria-live="polite">
-          <span class="identity-kicker">Current document</span>
-          <span id="document-title">No document open</span>
-          <span id="dirty-marker" class="dirty" hidden>Unsaved changes</span>
-        </div>
-        <button id="theme-button" class="icon-button" aria-label="Use light theme" title="Toggle color theme"><svg class="icon"><use href="#icon-theme"/></svg></button>
-      </div>
-      <div class="commandbar" aria-label="Document navigation and view controls">
-        <div class="toolbar-group history-tools" aria-label="Edit history">
-          <button id="undo-button" class="icon-button" aria-label="Undo" title="Undo last page command (Ctrl+Z)" disabled><svg class="icon"><use href="#icon-undo"/></svg></button>
-          <button id="redo-button" class="icon-button" aria-label="Redo" title="Redo page command (Ctrl+Shift+Z)" disabled><svg class="icon"><use href="#icon-redo"/></svg></button>
+          <strong>DocuForge</strong>
         </div>
         <span class="toolbar-divider" aria-hidden="true"></span>
+        <div class="file-actions" aria-label="Document actions">
+          <button id="open-button" class="icon-button primary-command" aria-label="Open PDF" data-tooltip="Open PDF"><svg class="icon"><use href="#icon-open"/></svg></button>
+          <input id="open-file" type="file" accept="application/pdf,.pdf" hidden>
+          <button id="save-button" class="icon-button" aria-label="Save" data-tooltip="Save · Ctrl+S" disabled><svg class="icon"><use href="#icon-save"/></svg></button>
+          <button id="save-as-button" class="icon-button" aria-label="Download PDF" data-tooltip="Download PDF" disabled><svg class="icon"><use href="#icon-download"/></svg></button>
+        </div>
+        <span class="toolbar-divider" aria-hidden="true"></span>
+        <div class="toolbar-group history-tools" aria-label="Edit history">
+          <button id="undo-button" class="icon-button" aria-label="Undo" data-tooltip="Undo · Ctrl+Z" disabled><svg class="icon"><use href="#icon-undo"/></svg></button>
+          <button id="redo-button" class="icon-button" aria-label="Redo" data-tooltip="Redo · Ctrl+Shift+Z" disabled><svg class="icon"><use href="#icon-redo"/></svg></button>
+        </div>
+        <div class="document-identity" aria-live="polite">
+          <span id="document-title">No document open</span>
+          <span id="dirty-marker" class="dirty" hidden>Unsaved</span>
+        </div>
+        <button id="theme-button" class="icon-button" aria-label="Use light theme" data-tooltip="Use light theme"><svg class="icon"><use href="#icon-theme"/></svg></button>
+      </div>
+      <div class="commandbar" aria-label="Document navigation and view controls">
         <div class="toolbar-group page-navigation" aria-label="Page navigation">
-          <button id="previous-page" class="icon-button" aria-label="Previous page" title="Previous page" disabled><svg class="icon"><use href="#icon-chevron-left"/></svg></button>
-          <label class="page-field"><span class="sr-only">Current page</span><input id="page-number" type="number" min="1" value="1" disabled><span aria-hidden="true">of</span><span id="page-count">0</span></label>
-          <button id="next-page" class="icon-button" aria-label="Next page" title="Next page" disabled><svg class="icon"><use href="#icon-chevron-right"/></svg></button>
+          <button id="previous-page" class="icon-button" aria-label="Previous page" data-tooltip="Previous page" disabled><svg class="icon"><use href="#icon-chevron-left"/></svg></button>
+          <label class="page-field"><span class="sr-only">Current page</span><input id="page-number" type="number" min="1" value="1" disabled><span aria-hidden="true">/</span><span id="page-count">0</span></label>
+          <button id="next-page" class="icon-button" aria-label="Next page" data-tooltip="Next page" disabled><svg class="icon"><use href="#icon-chevron-right"/></svg></button>
         </div>
         <span class="toolbar-divider" aria-hidden="true"></span>
         <div class="toolbar-group zoom-tools" aria-label="Zoom controls">
-          <button id="zoom-out" class="icon-button" aria-label="Zoom out" title="Zoom out" disabled><svg class="icon"><use href="#icon-minus"/></svg></button>
+          <button id="zoom-out" class="icon-button" aria-label="Zoom out" data-tooltip="Zoom out" disabled><svg class="icon"><use href="#icon-zoom-out"/></svg></button>
           <select id="zoom-select" aria-label="Zoom" disabled><option value="page-width">Fit width</option><option value="page-fit">Fit page</option><option value="0.75">75%</option><option value="1">100%</option><option value="1.25">125%</option><option value="1.5">150%</option><option value="2">200%</option></select>
-          <button id="zoom-in" class="icon-button" aria-label="Zoom in" title="Zoom in" disabled><svg class="icon"><use href="#icon-plus"/></svg></button>
+          <button id="zoom-in" class="icon-button" aria-label="Zoom in" data-tooltip="Zoom in" disabled><svg class="icon"><use href="#icon-zoom-in"/></svg></button>
         </div>
-        <div class="search-tools" role="search">
-          <svg class="icon search-leading" aria-hidden="true"><use href="#icon-search"/></svg>
-          <input id="search-field" type="search" placeholder="Find in document" aria-label="Find in document" disabled>
-          <button id="search-button" disabled>Find</button>
+        <div id="search-tools" class="search-tools" role="search">
+          <button id="search-button" class="icon-button" aria-label="Search document" aria-expanded="false" data-tooltip="Search" disabled><svg class="icon"><use href="#icon-search"/></svg></button>
+          <input id="search-field" type="search" aria-label="Search document" autocomplete="off" disabled hidden>
         </div>
-        <div class="scope-note"><span class="scope-dot"></span>Page editor</div>
       </div>
     </header>
 
     <main class="workspace-shell">
       <aside class="left-panel" aria-label="Pages and documents">
         <div class="panel-tabs" role="tablist" aria-label="Workspace navigator">
-          <button class="tab active" role="tab" aria-selected="true" aria-controls="pages-panel" data-panel="pages-panel"><svg class="icon"><use href="#icon-pages"/></svg><span>Pages</span></button>
-          <button class="tab" role="tab" aria-selected="false" aria-controls="documents-panel" data-panel="documents-panel"><svg class="icon"><use href="#icon-library"/></svg><span>Library</span></button>
+          <button class="tab active" role="tab" aria-label="Page thumbnails" data-tooltip="Pages" aria-selected="true" aria-controls="pages-panel" data-panel="pages-panel"><svg class="icon"><use href="#icon-pages"/></svg></button>
+          <button class="tab" role="tab" aria-label="Document library" data-tooltip="Library" aria-selected="false" aria-controls="documents-panel" data-panel="documents-panel"><svg class="icon"><use href="#icon-library"/></svg></button>
         </div>
         <section id="pages-panel" class="panel-body active" role="tabpanel">
-          <div class="panel-heading"><div><span class="eyebrow">Organize</span><h2>Page tools</h2></div><span id="selection-count" class="selection-count">No selection</span></div>
-          <div class="page-actions">
-            <button id="rotate-left" disabled title="Rotate selected pages 90° left"><svg class="icon"><use href="#icon-rotate-left"/></svg><span>Rotate left</span></button>
-            <button id="rotate-right" disabled title="Rotate selected pages 90° right"><svg class="icon"><use href="#icon-rotate-right"/></svg><span>Rotate right</span></button>
-            <button id="extract-pages" disabled title="Download selected pages as a separate PDF"><svg class="icon"><use href="#icon-extract"/></svg><span>Extract</span></button>
-            <button id="delete-pages" class="danger-button" disabled title="Remove selected pages from the pending version"><svg class="icon"><use href="#icon-trash"/></svg><span>Delete</span></button>
+          <div class="page-actions" aria-label="Selected page actions">
+            <button id="rotate-left" class="icon-button" aria-label="Rotate counterclockwise" data-tooltip="Rotate counterclockwise" disabled><svg class="icon"><use href="#icon-rotate-left"/></svg></button>
+            <button id="rotate-right" class="icon-button" aria-label="Rotate clockwise" data-tooltip="Rotate clockwise" disabled><svg class="icon"><use href="#icon-rotate-right"/></svg></button>
+            <button id="extract-pages" class="icon-button" aria-label="Extract selected pages" data-tooltip="Extract selected pages" disabled><svg class="icon"><use href="#icon-extract"/></svg></button>
+            <button id="delete-pages" class="icon-button danger-button" aria-label="Delete selected pages" data-tooltip="Delete selected pages" disabled><svg class="icon"><use href="#icon-trash"/></svg></button>
           </div>
-          <p class="hint"><span aria-hidden="true">↕</span> Drag thumbnails to reorder. Select pages for group actions.</p>
           <div id="thumbnail-list" class="thumbnail-list" aria-label="Page thumbnails"></div>
         </section>
         <section id="documents-panel" class="panel-body" role="tabpanel" hidden>
-          <div class="panel-heading"><div><span class="eyebrow">Workspace</span><h2>Document library</h2></div><button id="refresh-documents" class="icon-button" title="Refresh document library" aria-label="Refresh document library"><svg class="icon"><use href="#icon-refresh"/></svg></button></div>
-          <p class="hint">Saved versions remain available after restart.</p>
+          <div class="library-actions"><button id="refresh-documents" class="icon-button" aria-label="Refresh document library" data-tooltip="Refresh library"><svg class="icon"><use href="#icon-refresh"/></svg></button></div>
           <div id="document-list" class="document-list"></div>
         </section>
       </aside>
 
       <section class="viewer-region" aria-label="PDF document canvas">
         <div id="empty-state" class="empty-state">
-          <div class="empty-card">
-            <span class="eyebrow">Local · private by default</span>
-            <div class="empty-icon" aria-hidden="true"><span>PDF</span></div>
-            <h1>Shape the document,<br><span>one page at a time.</span></h1>
-            <p>Open a PDF to reorder, rotate, remove, and extract pages in a focused local workspace. Your source stays unchanged.</p>
-            <label class="primary-button empty-action" for="open-file"><svg class="icon"><use href="#icon-open"/></svg><span>Choose a PDF</span></label>
-            <div class="empty-features" aria-label="Available capabilities"><span>View & search</span><span>Organize pages</span><span>Version safely</span></div>
-          </div>
+          <h1>Open a PDF</h1>
+          <button id="empty-open-button" class="empty-action" aria-label="Open PDF"><svg class="icon"><use href="#icon-open"/></svg><span>Choose file</span></button>
         </div>
         <div id="viewerContainer" class="viewer-container" hidden><div id="viewer" class="pdfViewer"></div></div>
         <div id="progress" class="progress" role="status" hidden><span class="progress-spinner" aria-hidden="true"></span><output>Working…</output></div>
       </section>
-
-      <aside class="right-panel" aria-label="Page properties">
-        <div class="panel-heading inspector-heading"><div><span class="eyebrow">Inspector</span><h2>Page properties</h2></div></div>
-        <div class="inspector-card"><dl><dt>Visible page</dt><dd id="property-page">—</dd><dt>Source page</dt><dd id="property-source">—</dd><dt>Rotation</dt><dd id="property-rotation">—</dd><dt>Stable ID</dt><dd id="property-id" class="mono">—</dd></dl></div>
-        <div class="operation-note"><svg class="icon"><use href="#icon-shield"/></svg><div><h3>Version-safe editing</h3><p>Page commands stay reversible. Save creates an immutable version and leaves the imported source untouched.</p></div></div>
-        <div class="scope-card"><span class="scope-label">v0.1 scope</span><p>Viewing and page organization. Annotation, OCR, and existing-content editing are intentionally not shown.</p></div>
-      </aside>
     </main>
 
-    <footer class="statusbar">
-      <span id="status-message" role="status">Ready</span>
-      <span class="local-status"><svg class="icon"><use href="#icon-shield"/></svg>Loopback-only workspace</span>
-      <span id="version-label"></span>
-    </footer>
-    <div id="toast" class="toast" role="status" aria-live="polite" hidden><svg class="icon toast-icon"><use href="#icon-shield"/></svg><span class="toast-message"></span><button class="toast-close" aria-label="Dismiss notification"><svg class="icon"><use href="#icon-close"/></svg></button></div>
+    <div id="status-message" class="sr-only" role="status" aria-live="polite">Ready</div>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden><svg class="icon toast-icon"><use href="#icon-success"/></svg><span class="toast-message"></span><button class="toast-close icon-button" aria-label="Dismiss notification" data-tooltip="Dismiss"><svg class="icon"><use href="#icon-close"/></svg></button></div>
     <dialog id="delete-dialog" class="confirmation-dialog" aria-labelledby="delete-dialog-title">
       <form method="dialog">
         <div class="dialog-icon"><svg class="icon"><use href="#icon-trash"/></svg></div>
-        <div class="dialog-copy"><span class="eyebrow">Confirm page command</span><h2 id="delete-dialog-title">Remove selected pages?</h2><p id="delete-dialog-message">This change remains reversible until you close the editing session.</p></div>
-        <div class="dialog-actions"><button value="cancel">Keep pages</button><button value="confirm" class="danger-solid">Remove pages</button></div>
+        <div class="dialog-copy"><h2 id="delete-dialog-title">Remove selected pages?</h2><p id="delete-dialog-message">You can undo this page command.</p></div>
+        <div class="dialog-actions"><button value="cancel">Cancel</button><button value="confirm" class="danger-solid">Delete</button></div>
       </form>
     </dialog>
     <script type="module" src="/assets/app.js"></script>

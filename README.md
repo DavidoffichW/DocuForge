@@ -2,8 +2,8 @@
 
 DocuForge is a polished local PDF workspace for viewing documents, organizing
 pages, and saving immutable document versions. Its focused browser interface
-uses a dark ruby and silver-grey visual system with clear document, page, and
-version state. The application combines a
+uses a compact dark ruby and silver-grey visual system with icon-led document
+and page controls. The application combines a
 FastAPI service, SQLite metadata, managed content-addressed storage, pikepdf for
 PDF transformations, and PDF.js for the browser viewer.
 
@@ -19,11 +19,11 @@ Version 0.1.0 supports:
 - fidelity checks that block transformations which would silently lose
   supported links, bookmarks, annotations, form fields, or page content.
 
-`Save version` persists the current page plan as a new immutable version.
-`Download PDF` downloads the current saved version; when the page plan has
-unsaved changes, the action is relabelled `Save & download` and materializes a
-new version first. Extract downloads only the selected pages and does not alter
-the working document.
+The Save command persists the current page plan as a new immutable version.
+Download PDF downloads the current saved version; with unsaved changes, it
+becomes Save and download and materializes a new version first. Tooltips and
+accessible names identify icon-only controls. Extract downloads only the
+selected pages and does not alter the working document.
 
 Annotations, comments, drawing, OCR, existing-content text or image editing,
 shared-server deployment, and collaborative workspaces are not implemented.
@@ -85,5 +85,7 @@ Browser tests also require Chromium:
 ## Licensing
 
 DocuForge source is available under the MIT License. PDF.js is redistributed
-under Apache-2.0. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the
-license retained with the vendored PDF.js distribution.
+under Apache-2.0. Selected Lucide icon paths are redistributed under ISC and,
+where derived from Feather, MIT terms. See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the license texts retained
+with the vendored assets.
