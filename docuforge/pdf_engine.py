@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import io
 from collections import Counter
@@ -10,7 +11,7 @@ from typing import Any
 
 import pikepdf
 from pypdf import PdfReader
-from pypdf.generic import ArrayObject, Destination, IndirectObject
+from pypdf.generic import ArrayObject, Destination, IndirectObject, NullObject
 
 from docuforge.errors import FidelityError, InvalidDocumentError
 from docuforge.page_commands import validate_page_state
@@ -222,7 +223,159 @@ def _resources_equivalent(expected: dict[str, Any], actual: dict[str, Any]) -> b
     return True
 
 
-def _annotation_signature(annotation: Any) -> dict[str, Any]:
+DESTINATION_PARAMETER_COUNTS = {
+    "/XYZ": 3,
+    "/Fit": 0,
+    "/FitH": 1,
+    "/FitV": 1,
+    "/FitR": 4,
+    "/FitB": 0,
+    "/FitBH": 1,
+    "/FitBV": 1,
+}
+
+
+def _resolve_required_object(value: Any, context: str) -> Any:
+    if hasattr(value, "get_object"):
+        try:
+            return value.get_object()
+        except Exception as exc:
+            raise FidelityError(f"unable to inspect {context}") from exc
+    return value
+
+
+def _destination_parameter(value: Any, context: str) -> float | None:
+    value = _resolve_required_object(value, context)
+    if value is None or isinstance(value, NullObject):
+        return None
+    if isinstance(value, bool):
+        raise FidelityError(f"invalid boolean parameter in {context}")
+    try:
+        return round(float(value), 8)
+    except (TypeError, ValueError) as exc:
+        raise FidelityError(f"unsupported parameter in {context}") from exc
+
+
+def _destination_signature(
+    reader: PdfReader,
+    destination: Any,
+    page_references: dict[tuple[int, int], int],
+    *,
+    context: str,
+) -> dict[str, Any] | None:
+    if destination is None:
+        return None
+    name: str | None = None
+    if isinstance(destination, (str, bytes)):
+        name = str(destination)
+        destination = reader.named_destinations.get(name)
+        if destination is None:
+            return {
+                "name": name,
+                "target": None,
+                "type": None,
+                "parameters": [],
+            }
+    destination = _resolve_required_object(destination, context)
+    if isinstance(destination, Destination):
+        values = list(destination.dest_array)
+    elif isinstance(destination, (ArrayObject, list)):
+        values = list(destination)
+    else:
+        raise FidelityError(f"unsupported destination object in {context}")
+    if len(values) < 2:
+        raise FidelityError(f"incomplete destination in {context}")
+    reference = _page_reference_key(values[0])
+    target = page_references.get(reference) if reference is not None else None
+    if reference is not None and target is None:
+        raise FidelityError(f"destination references an unavailable page in {context}")
+    destination_type = str(values[1])
+    parameter_count = DESTINATION_PARAMETER_COUNTS.get(destination_type)
+    if parameter_count is None:
+        raise FidelityError(f"unsupported destination type {destination_type} in {context}")
+    if len(values) != parameter_count + 2:
+        raise FidelityError(f"invalid {destination_type} destination in {context}")
+    parameters = [
+        _destination_parameter(value, context)
+        for value in values[2:]
+    ]
+    return {
+        "name": name,
+        "target": target,
+        "type": destination_type,
+        "parameters": parameters,
+    }
+
+
+def _action_signature(
+    reader: PdfReader,
+    action: Any,
+    page_references: dict[tuple[int, int], int],
+    *,
+    context: str,
+    unsupported_actions: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if action is None:
+        return None
+    action = _resolve_required_object(action, context)
+    if not hasattr(action, "get") or not hasattr(action, "keys"):
+        raise FidelityError(f"invalid action dictionary in {context}")
+    action_type = str(action.get("/S", ""))
+    allowed_keys = {
+        "/URI": {"/Type", "/S", "/URI", "/IsMap"},
+        "/GoTo": {"/Type", "/S", "/D"},
+        "/Named": {"/Type", "/S", "/N"},
+    }.get(action_type)
+    extra_keys = sorted(
+        str(key) for key in action.keys() if str(key) not in (allowed_keys or set())
+    )
+    if allowed_keys is None or extra_keys:
+        unsupported_actions.append(
+            {"context": context, "type": action_type or "missing", "extra_keys": extra_keys}
+        )
+        return {
+            "type": action_type or "missing",
+            "supported": False,
+            "extra_keys": extra_keys,
+        }
+    if action_type == "/URI":
+        uri = action.get("/URI")
+        if uri is None:
+            raise FidelityError(f"URI action has no URI in {context}")
+        return {
+            "type": action_type,
+            "supported": True,
+            "uri": str(uri),
+            "is_map": bool(action.get("/IsMap", False)),
+        }
+    if action_type == "/GoTo":
+        destination = _destination_signature(
+            reader,
+            action.get("/D"),
+            page_references,
+            context=f"{context} destination",
+        )
+        if destination is None:
+            raise FidelityError(f"GoTo action has no destination in {context}")
+        return {
+            "type": action_type,
+            "supported": True,
+            "destination": destination,
+        }
+    name = action.get("/N")
+    if name is None:
+        raise FidelityError(f"Named action has no name in {context}")
+    return {"type": action_type, "supported": True, "name": str(name)}
+
+
+def _annotation_signature(
+    annotation: Any,
+    reader: PdfReader,
+    page_references: dict[tuple[int, int], int],
+    *,
+    context: str,
+    unsupported_actions: list[dict[str, Any]],
+) -> dict[str, Any]:
     appearance = annotation.get("/AP") or {}
     try:
         appearance = appearance.get_object()
@@ -246,6 +399,33 @@ def _annotation_signature(annotation: Any) -> dict[str, Any]:
         except Exception:
             pass
     rect = annotation.get("/Rect") or []
+    direct_destination = _destination_signature(
+        reader,
+        annotation.get("/Dest"),
+        page_references,
+        context=f"{context} direct destination",
+    )
+    action = _action_signature(
+        reader,
+        annotation.get("/A"),
+        page_references,
+        context=f"{context} action",
+        unsupported_actions=unsupported_actions,
+    )
+    additional_actions: dict[str, Any] = {}
+    raw_additional = annotation.get("/AA")
+    if raw_additional is not None:
+        raw_additional = _resolve_required_object(raw_additional, f"{context} additional actions")
+        if not hasattr(raw_additional, "items"):
+            raise FidelityError(f"invalid additional-action dictionary in {context}")
+        for trigger, value in sorted(raw_additional.items(), key=lambda item: str(item[0])):
+            additional_actions[str(trigger)] = _action_signature(
+                reader,
+                value,
+                page_references,
+                context=f"{context} additional action {trigger}",
+                unsupported_actions=unsupported_actions,
+            )
     return {
         "subtype": str(annotation.get("/Subtype", "")),
         "rect": [round(float(item), 5) for item in rect],
@@ -256,6 +436,9 @@ def _annotation_signature(annotation: Any) -> dict[str, Any]:
         "field_type": str(field.get("/FT", "")),
         "field_value": str(field.get("/V", "")),
         "appearance_structure": sorted(appearance_signatures),
+        "destination": direct_destination,
+        "action": action,
+        "additional_actions": additional_actions,
     }
 
 
@@ -286,30 +469,15 @@ def _resolve_destination(
     destination: Any,
     page_references: dict[tuple[int, int], int],
 ) -> tuple[int | None, str | None]:
-    if destination is None:
+    signature = _destination_signature(
+        reader,
+        destination,
+        page_references,
+        context="link destination",
+    )
+    if signature is None:
         return None, None
-    if isinstance(destination, (str, bytes)):
-        name = str(destination)
-        named = reader.named_destinations.get(name)
-        if named is None:
-            return None, name
-        try:
-            return int(reader.get_destination_page_number(named)), name
-        except Exception:
-            return None, name
-    if isinstance(destination, Destination):
-        try:
-            return int(reader.get_destination_page_number(destination)), None
-        except Exception:
-            return None, None
-    if isinstance(destination, ArrayObject) or isinstance(destination, list):
-        if not destination:
-            return None, None
-        destination = destination[0]
-    reference = _page_reference_key(destination)
-    if reference is not None:
-        return page_references.get(reference), None
-    return None, None
+    return signature["target"], signature["name"]
 
 
 def inspect_semantics(source: Path | bytes) -> dict[str, Any]:
@@ -327,20 +495,31 @@ def inspect_semantics(source: Path | bytes) -> dict[str, Any]:
     pages: list[dict[str, Any]] = []
     resource_digest_budget = [RESOURCE_DIGEST_BUDGET]
     required_named_destinations: set[str] = set()
+    unsupported_actions: list[dict[str, Any]] = []
     for page_index, page in enumerate(reader.pages):
         annotations: Counter[str] = Counter()
         external_links: list[str] = []
         internal_links: list[dict[str, Any]] = []
         widget_fields: list[str] = []
         annotation_details: list[dict[str, Any]] = []
-        for annotation_reference in page.get("/Annots", []) or []:
+        for annotation_index, annotation_reference in enumerate(page.get("/Annots", []) or []):
             try:
                 annotation = annotation_reference.get_object()
-            except Exception:
-                continue
+            except Exception as exc:
+                raise FidelityError(
+                    f"unable to inspect annotation {annotation_index + 1} on page {page_index + 1}"
+                ) from exc
             subtype = str(annotation.get("/Subtype", "unknown"))
             annotations[subtype] += 1
-            annotation_details.append(_annotation_signature(annotation))
+            annotation_details.append(
+                _annotation_signature(
+                    annotation,
+                    reader,
+                    page_references,
+                    context=f"page {page_index + 1} annotation {annotation_index + 1}",
+                    unsupported_actions=unsupported_actions,
+                )
+            )
             if subtype == "/Widget":
                 field = annotation
                 if "/T" not in field and field.get("/Parent") is not None:
@@ -394,13 +573,18 @@ def inspect_semantics(source: Path | bytes) -> dict[str, Any]:
         )
 
     fields = reader.get_fields() or {}
-    named_destinations: dict[str, int | None] = {}
+    named_destinations: dict[str, dict[str, Any]] = {}
     for name, destination in reader.named_destinations.items():
-        try:
-            target = int(reader.get_destination_page_number(destination))
-        except Exception:
-            target = None
-        named_destinations[str(name)] = target
+        signature = _destination_signature(
+            reader,
+            destination,
+            page_references,
+            context=f"named destination {name}",
+        )
+        if signature is None:
+            raise FidelityError(f"named destination {name} is empty")
+        signature["name"] = str(name)
+        named_destinations[str(name)] = signature
 
     result = {
         "page_count": len(reader.pages),
@@ -409,6 +593,7 @@ def inspect_semantics(source: Path | bytes) -> dict[str, Any]:
         "outlines": _outline_items(reader),
         "named_destinations": dict(sorted(named_destinations.items())),
         "required_named_destinations": sorted(required_named_destinations),
+        "unsupported_actions": unsupported_actions,
         "has_optional_content": bool(reader.trailer["/Root"].get("/OCProperties")),
     }
     return result
@@ -419,6 +604,72 @@ def _semantic_hash(snapshot: dict[str, Any]) -> str:
 
     encoded = json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _remap_destination(
+    destination: dict[str, Any] | None,
+    page_map: dict[int, int],
+) -> dict[str, Any] | None:
+    if destination is None:
+        return None
+    remapped = copy.deepcopy(destination)
+    target = remapped.get("target")
+    if target is not None:
+        if target not in page_map:
+            raise FidelityError("destination target is not present in the output page map")
+        remapped["target"] = page_map[target]
+    return remapped
+
+
+def _remap_action(
+    action: dict[str, Any] | None,
+    page_map: dict[int, int],
+) -> dict[str, Any] | None:
+    if action is None:
+        return None
+    remapped = copy.deepcopy(action)
+    if action.get("type") == "/GoTo" and action.get("supported"):
+        remapped["destination"] = _remap_destination(action["destination"], page_map)
+    return remapped
+
+
+def _remap_annotation(
+    annotation: dict[str, Any],
+    page_map: dict[int, int],
+) -> dict[str, Any]:
+    remapped = copy.deepcopy(annotation)
+    remapped["destination"] = _remap_destination(annotation.get("destination"), page_map)
+    remapped["action"] = _remap_action(annotation.get("action"), page_map)
+    remapped["additional_actions"] = {
+        trigger: _remap_action(action, page_map)
+        for trigger, action in annotation.get("additional_actions", {}).items()
+    }
+    return remapped
+
+
+def _expected_named_destinations(
+    snapshot: dict[str, Any],
+    page_map: dict[int, int],
+) -> dict[str, dict[str, Any]]:
+    expected: dict[str, dict[str, Any]] = {}
+    for name, destination in snapshot["named_destinations"].items():
+        target = destination.get("target")
+        if target is None or target not in page_map:
+            continue
+        expected[name] = _remap_destination(destination, page_map)
+    return dict(sorted(expected.items()))
+
+
+def _pikepdf_destination_array(
+    target: Any,
+    destination: dict[str, Any],
+) -> pikepdf.Array:
+    destination_type = destination["type"]
+    if destination_type not in DESTINATION_PARAMETER_COUNTS:
+        raise FidelityError(f"unsupported destination type {destination_type}")
+    values: list[Any] = [target, pikepdf.Name(destination_type)]
+    values.extend(destination["parameters"])
+    return pikepdf.Array(values)
 
 
 class PdfEngine:
@@ -461,6 +712,11 @@ class PdfEngine:
             raise FidelityError(
                 "PDF layers are not transformed in this milestone; save was blocked"
             )
+        if source_snapshot["unsupported_actions"]:
+            action = source_snapshot["unsupported_actions"][0]
+            raise FidelityError(
+                f"unsupported PDF action {action['type']} in {action['context']}; save was blocked"
+            )
         selected = {int(page["source_index"]) for page in page_states}
         for page in source_snapshot["pages"]:
             if page["source_index"] not in selected:
@@ -493,10 +749,25 @@ class PdfEngine:
                 "crop_box",
                 "content_sha256",
                 "annotations",
-                "annotation_details",
             ):
                 if output_page[key] != source_page[key]:
                     raise FidelityError(f"saved PDF changed page {output_index + 1} {key}")
+            expected_annotations = sorted(
+                (
+                    _remap_annotation(annotation, target_map)
+                    for annotation in source_page["annotation_details"]
+                ),
+                key=lambda item: (
+                    item["subtype"],
+                    item["rect"],
+                    item["field_name"],
+                    item["contents"],
+                ),
+            )
+            if output_page["annotation_details"] != expected_annotations:
+                raise FidelityError(
+                    f"saved PDF changed page {output_index + 1} annotation actions"
+                )
             if not _resources_equivalent(source_page["resources"], output_page["resources"]):
                 raise FidelityError(f"saved PDF changed page {output_index + 1} resources")
             if output_page["rotation"] != expected_rotation:
@@ -529,10 +800,9 @@ class PdfEngine:
         if output["fields"] != expected_fields:
             raise FidelityError("saved PDF changed interactive form registration")
 
-        required_names = set(source["required_named_destinations"])
-        missing_names = required_names.difference(output["named_destinations"])
-        if missing_names:
-            raise FidelityError("saved PDF lost a required named destination")
+        expected_names = _expected_named_destinations(source, target_map)
+        if output["named_destinations"] != expected_names:
+            raise FidelityError("saved PDF changed named destination semantics")
         if source["has_optional_content"] and not output["has_optional_content"]:
             raise FidelityError("saved PDF lost optional-content configuration")
 
@@ -566,12 +836,15 @@ class PdfEngine:
             dests = pikepdf.NameTree.new(destination).obj
             names["/Dests"] = dests
         name_tree = pikepdf.NameTree(dests)
-        for name, source_target in snapshot["named_destinations"].items():
-            if source_target not in page_map or name in name_tree:
+        for name, source_destination in snapshot["named_destinations"].items():
+            source_target = source_destination.get("target")
+            if source_target is None or source_target not in page_map or name in name_tree:
                 continue
             target = destination.pages[page_map[source_target]].obj
             name_tree[name] = destination.make_indirect(
-                pikepdf.Dictionary(D=pikepdf.Array([target, pikepdf.Name("/Fit")]))
+                pikepdf.Dictionary(
+                    D=_pikepdf_destination_array(target, source_destination)
+                )
             )
 
         target_root = outline_root
@@ -648,7 +921,7 @@ class PdfEngine:
         output_snapshot = inspect_semantics(first)
         self._verify_output(source_snapshot, output_snapshot, page_states)
 
-        second = self._serialize_again(source_path, page_states)
+        second = self._serialize_again(source_path, page_states, source_snapshot)
         return MaterializationResult(
             pdf_bytes=first,
             byte_sha256=hashlib.sha256(first).hexdigest(),
@@ -657,8 +930,12 @@ class PdfEngine:
             byte_reproducible=first == second,
         )
 
-    def _serialize_again(self, source_path: Path, page_states: list[dict[str, Any]]) -> bytes:
-        snapshot = inspect_semantics(source_path)
+    def _serialize_again(
+        self,
+        source_path: Path,
+        page_states: list[dict[str, Any]],
+        snapshot: dict[str, Any],
+    ) -> bytes:
         with pikepdf.Pdf.open(source_path) as source:
             destination = pikepdf.Pdf.new()
             try:
@@ -697,6 +974,13 @@ class PdfEngine:
         source_snapshots = [inspect_semantics(path) for path in sources]
         if any(snapshot["has_optional_content"] for snapshot in source_snapshots):
             raise FidelityError("PDF layers are not merged in this milestone")
+        for snapshot in source_snapshots:
+            if snapshot["unsupported_actions"]:
+                action = snapshot["unsupported_actions"][0]
+                raise FidelityError(
+                    f"unsupported PDF action {action['type']} in "
+                    f"{action['context']}; merge was blocked"
+                )
         all_fields = [field for snapshot in source_snapshots for field in snapshot["fields"]]
         if len(all_fields) != len(set(all_fields)):
             raise FidelityError("merge contains conflicting form-field names")
@@ -739,7 +1023,7 @@ class PdfEngine:
         if snapshot["page_count"] != sum(item["page_count"] for item in source_snapshots):
             raise FidelityError("merged PDF page count is incorrect")
         self._verify_merge_output(source_snapshots, snapshot)
-        second = self._merge_again(sources)
+        second = self._merge_again(sources, source_snapshots)
         return MaterializationResult(
             pdf_bytes=data,
             byte_sha256=hashlib.sha256(data).hexdigest(),
@@ -756,8 +1040,13 @@ class PdfEngine:
         offset = 0
         expected_fields: set[str] = set()
         expected_outlines: list[dict[str, Any]] = []
+        expected_named_destinations: dict[str, dict[str, Any]] = {}
         requires_optional_content = False
         for source in sources:
+            page_map = {
+                source_index: offset + source_index
+                for source_index in range(source["page_count"])
+            }
             for source_index, source_page in enumerate(source["pages"]):
                 output_page = output["pages"][offset + source_index]
                 for key in (
@@ -766,12 +1055,27 @@ class PdfEngine:
                     "crop_box",
                     "content_sha256",
                     "annotations",
-                    "annotation_details",
                     "external_links",
                     "widget_fields",
                 ):
                     if output_page[key] != source_page[key]:
                         raise FidelityError(f"merge changed page {offset + source_index + 1} {key}")
+                expected_annotations = sorted(
+                    (
+                        _remap_annotation(annotation, page_map)
+                        for annotation in source_page["annotation_details"]
+                    ),
+                    key=lambda item: (
+                        item["subtype"],
+                        item["rect"],
+                        item["field_name"],
+                        item["contents"],
+                    ),
+                )
+                if output_page["annotation_details"] != expected_annotations:
+                    raise FidelityError(
+                        f"merge changed page {offset + source_index + 1} annotation actions"
+                    )
                 if not _resources_equivalent(
                     source_page["resources"], output_page["resources"]
                 ):
@@ -796,17 +1100,25 @@ class PdfEngine:
                 }
                 for item in source["outlines"]
             )
+            expected_named_destinations.update(
+                _expected_named_destinations(source, page_map)
+            )
             requires_optional_content = requires_optional_content or source["has_optional_content"]
             offset += source["page_count"]
         if output["fields"] != sorted(expected_fields):
             raise FidelityError("merge changed interactive form registration")
         if output["outlines"] != expected_outlines:
             raise FidelityError("merge changed bookmarks")
+        if output["named_destinations"] != dict(sorted(expected_named_destinations.items())):
+            raise FidelityError("merge changed named destination semantics")
         if requires_optional_content and not output["has_optional_content"]:
             raise FidelityError("merge lost optional-content configuration")
 
-    def _merge_again(self, sources: list[Path]) -> bytes:
-        snapshots = [inspect_semantics(path) for path in sources]
+    def _merge_again(
+        self,
+        sources: list[Path],
+        snapshots: list[dict[str, Any]],
+    ) -> bytes:
         destination = pikepdf.Pdf.new()
         try:
             with destination.open_outline() as outline:

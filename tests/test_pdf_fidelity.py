@@ -7,6 +7,7 @@ import pikepdf
 import pytest
 from PIL import Image
 from pypdf import PdfReader, PdfWriter
+from pypdf.generic import Fit
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
@@ -93,17 +94,163 @@ def test_named_destination_survives_reorder(tmp_path: Path, pdf_bytes: bytes) ->
     reader = PdfReader(BytesIO(pdf_bytes))
     writer = PdfWriter()
     writer.clone_document_from_reader(reader)
-    writer.add_named_destination("chapter-two", 1)
+    writer.add_named_destination("chapter-two", 1, Fit.xyz(72, 700, 1.5))
     named = tmp_path / "named.pdf"
     with named.open("wb") as output:
         writer.write(output)
     before = inspect_semantics(named)
-    assert before["named_destinations"]["chapter-two"] == 1
+    assert before["named_destinations"]["chapter-two"] == {
+        "name": "chapter-two",
+        "target": 1,
+        "type": "/XYZ",
+        "parameters": [72.0, 700.0, 1.5],
+    }
     pages = initial_page_state("version", 3)
-    pages = [pages[2], pages[1], pages[0]]
+    pages = [pages[2], pages[0], pages[1]]
     result = PdfEngine().materialize(named, pages)
     after = inspect_semantics(result.pdf_bytes)
-    assert after["named_destinations"]["chapter-two"] == 1
+    assert after["named_destinations"]["chapter-two"] == {
+        "name": "chapter-two",
+        "target": 2,
+        "type": "/XYZ",
+        "parameters": [72.0, 700.0, 1.5],
+    }
+
+
+def test_named_destinations_and_goto_actions_keep_view_semantics(
+    tmp_path: Path,
+    interactive_pdf_bytes: bytes,
+) -> None:
+    reader = PdfReader(BytesIO(interactive_pdf_bytes))
+    writer = PdfWriter()
+    writer.clone_document_from_reader(reader)
+    writer.add_named_destination("detail-view", 1, Fit.fit_rectangle(10, 20, 400, 700))
+    named = tmp_path / "named-action.pdf"
+    with named.open("wb") as output:
+        writer.write(output)
+    with pikepdf.Pdf.open(named, allow_overwriting_input=True) as pdf:
+        link = next(
+            annotation
+            for annotation in pdf.pages[0].obj["/Annots"]
+            if str(annotation.get("/Subtype")) == "/Link"
+            and annotation.get("/A") is None
+        )
+        if "/Dest" in link:
+            del link["/Dest"]
+        link["/A"] = pdf.make_indirect(
+            pikepdf.Dictionary(S=pikepdf.Name("/GoTo"), D=pikepdf.String("detail-view"))
+        )
+        pdf.save(named)
+
+    before = inspect_semantics(named)
+    pages = initial_page_state("version", 3)
+    reordered = [pages[2], pages[0], pages[1]]
+    result = PdfEngine().materialize(named, reordered)
+    after = inspect_semantics(result.pdf_bytes)
+    expected_destination = {
+        "name": "detail-view",
+        "target": 2,
+        "type": "/FitR",
+        "parameters": [10.0, 20.0, 400.0, 700.0],
+    }
+    assert before["named_destinations"]["detail-view"]["target"] == 1
+    assert after["named_destinations"]["detail-view"] == expected_destination
+    goto_actions = [
+        detail["action"]
+        for detail in after["pages"][1]["annotation_details"]
+        if detail["action"] and detail["action"]["type"] == "/GoTo"
+    ]
+    assert goto_actions == [
+        {
+            "type": "/GoTo",
+            "supported": True,
+            "destination": expected_destination,
+        }
+    ]
+
+
+def test_uri_action_parameters_are_preserved(
+    tmp_path: Path,
+    interactive_pdf_bytes: bytes,
+) -> None:
+    source = write_pdf(tmp_path / "uri-action.pdf", interactive_pdf_bytes)
+    before = inspect_semantics(source)
+    result = PdfEngine().materialize(source, initial_page_state("version", 3))
+    after = inspect_semantics(result.pdf_bytes)
+    before_uri = [
+        detail["action"]
+        for detail in before["pages"][0]["annotation_details"]
+        if detail["action"] and detail["action"]["type"] == "/URI"
+    ]
+    after_uri = [
+        detail["action"]
+        for detail in after["pages"][0]["annotation_details"]
+        if detail["action"] and detail["action"]["type"] == "/URI"
+    ]
+    assert before_uri == after_uri == [
+        {
+            "type": "/URI",
+            "supported": True,
+            "uri": "https://example.invalid/docuforge",
+            "is_map": False,
+        }
+    ]
+
+
+def test_unsupported_annotation_action_blocks_transformation(
+    tmp_path: Path,
+    interactive_pdf_bytes: bytes,
+) -> None:
+    source = write_pdf(tmp_path / "unsupported-action.pdf", interactive_pdf_bytes)
+    with pikepdf.Pdf.open(source, allow_overwriting_input=True) as pdf:
+        link = next(
+            annotation
+            for annotation in pdf.pages[0].obj["/Annots"]
+            if str(annotation.get("/Subtype")) == "/Link"
+        )
+        link["/A"] = pdf.make_indirect(
+            pikepdf.Dictionary(
+                S=pikepdf.Name("/JavaScript"),
+                JS=pikepdf.String("app.alert('not executed')"),
+            )
+        )
+        if "/Dest" in link:
+            del link["/Dest"]
+        pdf.save(source)
+
+    with pytest.raises(FidelityError, match="unsupported PDF action /JavaScript"):
+        PdfEngine().materialize(source, initial_page_state("version", 3))
+
+
+def test_merge_preserves_nondefault_named_destination_semantics(
+    tmp_path: Path,
+    pdf_bytes: bytes,
+) -> None:
+    sources: list[Path] = []
+    for index, fit in enumerate((Fit.xyz(12, 710, 2), Fit.fit_horizontally(650))):
+        reader = PdfReader(BytesIO(pdf_bytes))
+        writer = PdfWriter()
+        writer.clone_document_from_reader(reader)
+        writer.add_named_destination(f"section-{index}", 1, fit)
+        path = tmp_path / f"source-{index}.pdf"
+        with path.open("wb") as output:
+            writer.write(output)
+        sources.append(path)
+
+    result = PdfEngine().merge(sources)
+    merged = inspect_semantics(result.pdf_bytes)["named_destinations"]
+    assert merged["section-0"] == {
+        "name": "section-0",
+        "target": 1,
+        "type": "/XYZ",
+        "parameters": [12.0, 710.0, 2.0],
+    }
+    assert merged["section-1"] == {
+        "name": "section-1",
+        "target": 4,
+        "type": "/FitH",
+        "parameters": [650.0],
+    }
 
 
 def test_preexisting_unresolved_link_remains_unresolved(
