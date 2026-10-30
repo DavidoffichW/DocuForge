@@ -10,7 +10,8 @@ The current editor foundation supports:
 - PDF import and validation with a 256 MiB default upload limit;
 - text selection, document search, PDF links, page navigation, and zoom;
 - lazy page viewing and bounded, on-demand thumbnail rendering;
-- page reorder, rotation, deletion, extraction, undo, and redo;
+- live page reorder, rotation, deletion, extraction, undo, and redo without
+  rebuilding the PDF until Save;
 - immutable Save versions, downloads, and restart recovery;
 - HTTP byte-range delivery for stored PDF versions; and
 - fidelity checks that block transformations which would silently lose
@@ -34,18 +35,23 @@ python -m venv .venv
 ```
 
 Open <http://127.0.0.1:8000>. The server intentionally rejects non-loopback
-bind addresses in this milestone. Set `DOCUFORGE_WORKSPACE` or pass
-`--workspace PATH` to choose the managed storage location.
+bind addresses and non-local HTTP Host values in this milestone. Browser
+mutations must be same-origin. Local non-browser API clients must opt in with
+`X-DocuForge-Client: local-api`; they must not send browser Origin or Fetch
+Metadata headers. Set `DOCUFORGE_WORKSPACE` or pass `--workspace PATH` to
+choose the managed storage location.
 
 The original imported bytes are retained unchanged. Save creates a new
 validated version instead of overwriting the source. A page operation that
 would create a known dangling internal link is rejected rather than silently
 degrading the document.
 
-Fidelity validation compares page content, navigation, annotations, forms, and
-resource structure. Decoded image-resource hashing is capped at 1 MiB per
-semantic inspection; larger or unsupported image encodings are compared by
-their declared structure rather than by decoding every pixel.
+Fidelity validation compares page content, navigation, named-destination view
+parameters, supported annotation actions, forms, and resource structure.
+Unsupported action types block the affected transformation. Decoded
+image-resource hashing is capped at 1 MiB per semantic inspection; larger or
+unsupported image encodings are compared by their declared structure rather
+than by decoding every pixel.
 
 ## Development
 
