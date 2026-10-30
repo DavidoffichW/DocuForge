@@ -16,12 +16,16 @@ const state = {
   version: null,
   session: null,
   pdf: null,
+  virtualPdf: null,
   loadingTask: null,
   selected: new Set(),
   thumbnailGeneration: 0,
   thumbnailQueue: [],
   thumbnailWorkers: 0,
   thumbnailCache: new Map(),
+  thumbnailTasks: new Set(),
+  viewerGeneration: 0,
+  mutationQueue: Promise.resolve(),
 };
 
 const eventBus = new EventBus();
@@ -56,6 +60,9 @@ function toast(message) {
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
   if (options.body && !(options.body instanceof FormData)) headers.set("Content-Type", "application/json");
+  if (options.method && options.method.toUpperCase() !== "GET") {
+    headers.set("X-DocuForge-Client", "browser");
+  }
   const response = await fetch(path, { ...options, headers });
   if (!response.ok) {
     let detail = { message: `Request failed (${response.status})` };
@@ -94,7 +101,7 @@ async function openDocument(documentId, versionId = null) {
     state.session = session;
     state.selected.clear();
     await loadPdf(`/api/versions/${version.id}/content`);
-    renderSession();
+    await renderSession({ focusPageId: session.pages[0]?.id, resetScale: true });
     status(`Opened ${document.title}`);
   } catch (error) { toast(error.message); status("Open failed"); }
   finally { busy(false); }
@@ -104,22 +111,128 @@ async function loadPdf(url) {
   state.thumbnailGeneration += 1;
   state.thumbnailQueue = [];
   state.thumbnailCache.clear();
+  cancelThumbnailTasks();
   if (state.loadingTask) await state.loadingTask.destroy().catch(() => {});
   state.loadingTask = pdfjsLib.getDocument({ url, disableAutoFetch: true, rangeChunkSize: 262144 });
   state.pdf = await state.loadingTask.promise;
-  viewer.setDocument(state.pdf);
-  linkService.setDocument(state.pdf);
   $("#empty-state").hidden = true;
   $("#viewerContainer").hidden = false;
-  await eventBus.dispatch("pagesinit", { source: window });
-  viewer.currentScaleValue = "page-width";
 }
 
-function renderSession() {
+function remapExplicitDestination(destination, pages) {
+  if (!Array.isArray(destination) || !Number.isInteger(destination[0])) return destination;
+  const virtualIndex = pages.findIndex((page) => page.source_index === destination[0]);
+  if (virtualIndex < 0) return null;
+  const mapped = [...destination];
+  mapped[0] = virtualIndex;
+  return mapped;
+}
+
+function createVirtualPage(sourcePage, pageState, virtualPageNumber) {
+  return new Proxy(sourcePage, {
+    get(target, property) {
+      if (property === "pageNumber") return virtualPageNumber;
+      if (property === "rotate") return (target.rotate + pageState.rotation) % 360;
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+function createVirtualDocument(sourcePdf, sessionPages) {
+  const pages = sessionPages.map((page) => ({ ...page }));
+  const pageCache = new Map();
+  const virtualPosition = (sourceIndex) => pages.findIndex((page) => page.source_index === sourceIndex);
+  return new Proxy(sourcePdf, {
+    get(target, property) {
+      if (property === "numPages") return pages.length;
+      if (property === "getPage") {
+        return async (pageNumber) => {
+          if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > pages.length) {
+            throw new Error("virtual page number is outside the editing session");
+          }
+          const pageState = pages[pageNumber - 1];
+          const cacheKey = `${pageState.id}:${pageState.rotation}:${pageNumber}`;
+          if (!pageCache.has(cacheKey)) {
+            const sourcePage = await target.getPage(pageState.source_index + 1);
+            pageCache.set(cacheKey, createVirtualPage(sourcePage, pageState, pageNumber));
+          }
+          return pageCache.get(cacheKey);
+        };
+      }
+      if (property === "getPageIndex") {
+        return async (reference) => {
+          const sourceIndex = await target.getPageIndex(reference);
+          const position = virtualPosition(sourceIndex);
+          if (position < 0) throw new Error("destination page was removed from the editing session");
+          return position;
+        };
+      }
+      if (property === "cachedPageNumber") {
+        return (reference) => {
+          const sourcePageNumber = target.cachedPageNumber(reference);
+          if (!sourcePageNumber) return null;
+          const position = virtualPosition(sourcePageNumber - 1);
+          return position < 0 ? null : position + 1;
+        };
+      }
+      if (property === "getDestination") {
+        return async (name) => remapExplicitDestination(await target.getDestination(name), pages);
+      }
+      if (property === "getDestinations") {
+        return async () => {
+          const destinations = await target.getDestinations();
+          return Object.fromEntries(Object.entries(destinations).map(
+            ([name, destination]) => [name, remapExplicitDestination(destination, pages)],
+          ));
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+function waitForViewerInitialization(generation) {
+  return new Promise((resolve) => {
+    const initialized = () => {
+      eventBus.off("pagesinit", initialized);
+      resolve(generation === state.viewerGeneration);
+    };
+    eventBus.on("pagesinit", initialized);
+  });
+}
+
+async function applySessionToViewer({ focusPageId = null, fallbackIndex = 0, resetScale = false } = {}) {
+  if (!state.pdf || !state.session?.pages.length) return;
+  const generation = ++state.viewerGeneration;
+  const previousScale = resetScale ? "page-width" : viewer.currentScaleValue || "page-width";
+  const initialized = waitForViewerInitialization(generation);
+  state.virtualPdf = createVirtualDocument(state.pdf, state.session.pages);
+  linkService.setDocument(state.virtualPdf);
+  viewer.setDocument(state.virtualPdf);
+  const current = await initialized;
+  if (!current) return;
+  const mappedIndex = focusPageId
+    ? state.session.pages.findIndex((page) => page.id === focusPageId)
+    : -1;
+  viewer.currentScaleValue = previousScale;
+  viewer.currentPageNumber = (mappedIndex >= 0
+    ? mappedIndex
+    : Math.min(fallbackIndex, state.session.pages.length - 1)) + 1;
+}
+
+function visiblePageContext() {
+  const index = Math.max(0, (viewer.currentPageNumber || 1) - 1);
+  return { pageId: state.session?.pages[index]?.id || null, index };
+}
+
+async function renderSession(viewOptions = {}) {
   const session = state.session;
   $("#document-title").textContent = state.document.title;
   $("#dirty-marker").hidden = !session.dirty;
   $("#page-count").textContent = session.pages.length;
+  $("#page-number").max = String(session.pages.length);
   $("#version-label").textContent = `Version ${state.version.version_number} · rev ${session.revision}`;
   const enabled = Boolean(state.pdf);
   all("#save-button, #save-as-button, #undo-button, #redo-button, #previous-page, #next-page, #page-number, #zoom-out, #zoom-in, #zoom-select, #search-field, #search-button").forEach((element) => { element.disabled = !enabled; });
@@ -128,11 +241,13 @@ function renderSession() {
   $("#redo-button").disabled = !session.redo.length;
   renderThumbnails();
   updateSelectionControls();
+  await applySessionToViewer(viewOptions);
 }
 
 function renderThumbnails() {
   const generation = ++state.thumbnailGeneration;
   state.thumbnailQueue = [];
+  cancelThumbnailTasks();
   const list = $("#thumbnail-list");
   list.replaceChildren();
   const observer = new IntersectionObserver((entries) => {
@@ -163,7 +278,7 @@ function renderThumbnails() {
     });
     item.addEventListener("click", (event) => {
       if (event.target.matches("input")) return;
-      viewer.currentPageNumber = page.source_index + 1;
+      viewer.currentPageNumber = index + 1;
       updateProperties(index);
     });
     item.addEventListener("dragstart", () => { item.classList.add("dragging"); item.dataset.dragging = "true"; });
@@ -206,14 +321,26 @@ async function renderThumbnail({ element, generation }) {
     if (state.thumbnailCache.size > 40) state.thumbnailCache.delete(state.thumbnailCache.keys().next().value);
   }
   if (generation !== state.thumbnailGeneration || !element.isConnected) return;
-  const viewport = page.getViewport({ scale: 0.23 });
+  const pageState = state.session.pages.find((item) => item.id === element.dataset.pageId);
+  if (!pageState) return;
+  const viewport = page.getViewport({
+    scale: 0.23,
+    rotation: (page.rotate + pageState.rotation) % 360,
+  });
   const canvas = document.createElement("canvas");
   canvas.width = Math.ceil(viewport.width);
   canvas.height = Math.ceil(viewport.height);
   const renderTask = page.render({ canvasContext: canvas.getContext("2d"), viewport });
+  state.thumbnailTasks.add(renderTask);
   try { await renderTask.promise; } catch (error) { if (error?.name !== "RenderingCancelledException") throw error; }
+  finally { state.thumbnailTasks.delete(renderTask); }
   if (generation !== state.thumbnailGeneration || !element.isConnected) { renderTask.cancel(); return; }
   element.querySelector(".thumbnail-placeholder").replaceWith(canvas);
+}
+
+function cancelThumbnailTasks() {
+  for (const task of state.thumbnailTasks) task.cancel();
+  state.thumbnailTasks.clear();
 }
 
 function updateSelectionControls() {
@@ -232,59 +359,75 @@ function updateProperties(index) {
 
 async function command(payload) {
   if (!state.session) return;
-  busy(true, "Updating page plan…");
-  try {
-    state.session = await api(`/api/sessions/${state.session.id}/commands`, {
-      method: "POST",
-      body: JSON.stringify({ expected_revision: state.session.revision, command: payload }),
-    });
-    for (const id of [...state.selected]) if (!state.session.pages.some((page) => page.id === id)) state.selected.delete(id);
-    renderSession();
-    status("Page plan updated; save to materialize the version");
-  } catch (error) { toast(error.message); }
-  finally { busy(false); }
+  return queueMutation(async () => {
+    const focus = visiblePageContext();
+    busy(true, "Updating page plan…");
+    try {
+      state.session = await api(`/api/sessions/${state.session.id}/commands`, {
+        method: "POST",
+        body: JSON.stringify({ expected_revision: state.session.revision, command: payload }),
+      });
+      for (const id of [...state.selected]) if (!state.session.pages.some((page) => page.id === id)) state.selected.delete(id);
+      await renderSession({ focusPageId: focus.pageId, fallbackIndex: focus.index });
+      status("Page plan updated; save to materialize the version");
+    } catch (error) { toast(error.message); }
+    finally { busy(false); }
+  });
 }
 
 async function runRevisionAction(action) {
-  busy(true, `${action === "undo" ? "Undoing" : "Redoing"}…`);
-  try {
-    state.session = await api(`/api/sessions/${state.session.id}/${action}`, {
-      method: "POST", body: JSON.stringify({ expected_revision: state.session.revision }),
-    });
-    renderSession();
-    status(action === "undo" ? "Last page command undone" : "Page command restored");
-  } catch (error) { toast(error.message); }
-  finally { busy(false); }
+  return queueMutation(async () => {
+    const focus = visiblePageContext();
+    busy(true, `${action === "undo" ? "Undoing" : "Redoing"}…`);
+    try {
+      state.session = await api(`/api/sessions/${state.session.id}/${action}`, {
+        method: "POST", body: JSON.stringify({ expected_revision: state.session.revision }),
+      });
+      await renderSession({ focusPageId: focus.pageId, fallbackIndex: focus.index });
+      status(action === "undo" ? "Last page command undone" : "Page command restored");
+    } catch (error) { toast(error.message); }
+    finally { busy(false); }
+  });
+}
+
+function queueMutation(operation) {
+  const queued = state.mutationQueue.then(operation, operation);
+  state.mutationQueue = queued.catch(() => {});
+  return queued;
 }
 
 async function save(downloadAfter = false) {
   if (!state.session) return;
-  busy(true, "Validating and saving version…");
-  try {
-    const result = await api(`/api/sessions/${state.session.id}/save`, {
-      method: "POST", body: JSON.stringify({ expected_revision: state.session.revision }),
-    });
-    state.version = result.version;
-    state.session = result.session;
-    await loadPdf(`/api/versions/${state.version.id}/content`);
-    renderSession();
-    status(`Saved immutable version ${state.version.version_number}`);
-    if (downloadAfter) download(`/api/versions/${state.version.id}/content`, state.document.title);
-  } catch (error) { toast(error.message); status("Save blocked"); }
-  finally { busy(false); }
+  return queueMutation(async () => {
+    busy(true, "Validating and saving version…");
+    try {
+      const result = await api(`/api/sessions/${state.session.id}/save`, {
+        method: "POST", body: JSON.stringify({ expected_revision: state.session.revision }),
+      });
+      state.version = result.version;
+      state.session = result.session;
+      await loadPdf(`/api/versions/${state.version.id}/content`);
+      await renderSession({ focusPageId: state.session.pages[0]?.id, resetScale: true });
+      status(`Saved immutable version ${state.version.version_number}`);
+      if (downloadAfter) download(`/api/versions/${state.version.id}/content`, state.document.title);
+    } catch (error) { toast(error.message); status("Save blocked"); }
+    finally { busy(false); }
+  });
 }
 
 async function extractSelected() {
-  busy(true, "Extracting selected pages…");
-  try {
-    const result = await api(`/api/sessions/${state.session.id}/extract`, {
-      method: "POST",
-      body: JSON.stringify({ expected_revision: state.session.revision, page_ids: [...state.selected] }),
-    });
-    download(`/api/artifacts/${result.artifact.id}/content`, "extracted-pages.pdf");
-    status("Extracted pages without changing the document");
-  } catch (error) { toast(error.message); }
-  finally { busy(false); }
+  return queueMutation(async () => {
+    busy(true, "Extracting selected pages…");
+    try {
+      const result = await api(`/api/sessions/${state.session.id}/extract`, {
+        method: "POST",
+        body: JSON.stringify({ expected_revision: state.session.revision, page_ids: [...state.selected] }),
+      });
+      download(`/api/artifacts/${result.artifact.id}/content`, "extracted-pages.pdf");
+      status("Extracted pages without changing the document");
+    } catch (error) { toast(error.message); }
+    finally { busy(false); }
+  });
 }
 
 function download(url, filename) {
@@ -312,8 +455,9 @@ async function refreshDocuments() {
 eventBus.on("pagesinit", () => { viewer.currentScaleValue = "page-width"; });
 eventBus.on("pagechanging", ({ pageNumber }) => {
   $("#page-number").value = pageNumber;
-  const index = state.session?.pages.findIndex((page) => page.source_index === pageNumber - 1);
-  if (index >= 0) updateProperties(index);
+  if (pageNumber >= 1 && pageNumber <= (state.session?.pages.length || 0)) {
+    updateProperties(pageNumber - 1);
+  }
 });
 eventBus.on("pagesloaded", ({ pagesCount }) => { $("#page-count").textContent = state.session?.pages.length ?? pagesCount; });
 
