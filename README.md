@@ -1,91 +1,143 @@
 # DocuForge
 
-DocuForge is a polished local PDF workspace for viewing documents, organizing
-pages, and saving immutable document versions. Its focused browser interface
-uses a compact dark ruby and silver-grey visual system with icon-led document
-and page controls. The application combines a
-FastAPI service, SQLite metadata, managed content-addressed storage, pikepdf for
-PDF transformations, and PDF.js for the browser viewer.
+> A local PDF workspace for organizing pages and keeping changes as saved versions.
 
-Version 0.1.0 supports:
+DocuForge gives you a clean place to open a PDF, find your way around it, move
+pages, and save the result. It runs on your machine and does not send your
+documents to a hosted service.
 
-- PDF import and validation with a 256 MiB default upload limit;
-- text selection, document search, PDF links, page navigation, and zoom;
-- lazy page viewing and bounded, on-demand thumbnail rendering;
-- live page reorder, rotation, deletion, extraction, undo, and redo without
-  rebuilding the PDF until Save;
-- immutable Save versions, downloads, and restart recovery;
-- HTTP byte-range delivery for stored PDF versions; and
-- fidelity checks that block transformations which would silently lose
-  supported links, bookmarks, annotations, form fields, or page content.
+## What it does
 
-The Save command persists the current page plan as a new immutable version.
-Download PDF downloads the current saved version; with unsaved changes, it
-becomes Save and download and materializes a new version first. Tooltips and
-accessible names identify icon-only controls. Extract downloads only the
-selected pages and does not alter the working document.
+- View PDFs with search, text selection, links, zoom, and page thumbnails
+- Reorder, rotate, delete, and extract pages
+- Undo and redo page changes before saving
+- Save changes as immutable document versions
+- Reopen saved versions after restarting the app
+- Refuse transformations that would discard supported document structures
 
-Annotations, comments, drawing, OCR, existing-content text or image editing,
-shared-server deployment, and collaborative workspaces are not implemented.
-DocuForge is a page-operations editor intended for trusted single-user use on
-the local machine, not a general replacement for a full PDF authoring suite.
+The original PDF is never overwritten.
 
-## Requirements
+## Install
 
-- CPython 3.11 or newer
-- A current desktop browser supported by PDF.js (automated browser qualification
-  uses Chromium)
+DocuForge requires Python 3.11 or newer and a current desktop browser.
 
-## Install and run
+### Windows
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+git clone https://github.com/DavidoffichW/DocuForge.git
+cd DocuForge
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install .
 .\.venv\Scripts\python.exe -m docuforge
 ```
 
-Open <http://127.0.0.1:8000>. The server intentionally rejects non-loopback
-bind addresses and non-local HTTP Host values in this milestone. Browser
-mutations must be same-origin. Local non-browser API clients must opt in with
-`X-DocuForge-Client: local-api`; they must not send browser Origin or Fetch
-Metadata headers. Set `DOCUFORGE_WORKSPACE` or pass `--workspace PATH` to
-choose the managed storage location.
+### macOS and Linux
 
-The original imported bytes are retained unchanged. Save creates a new
-validated version instead of overwriting the source. A page operation that
-would create a known dangling internal link is rejected rather than silently
-degrading the document.
+```bash
+git clone https://github.com/DavidoffichW/DocuForge.git
+cd DocuForge
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install .
+python -m docuforge
+```
 
-Fidelity validation compares page content, navigation, named-destination view
-parameters, supported annotation actions, forms, and resource structure.
-Unsupported action types block the affected transformation. Decoded
-image-resource hashing is capped at 1 MiB per semantic inspection; larger or
-unsupported image encodings are compared by their declared structure rather
-than by decoding every pixel.
+Open <http://127.0.0.1:8000>. Keep the terminal running while you use the app.
+Press `Ctrl+C` to stop it.
 
-The interface defaults to its dark theme and also provides a persistent light
-theme. Motion is limited to short state and continuity cues and follows the
-operating system's reduced-motion preference.
+DocuForge stores its database and managed PDF versions in a local workspace.
+To put that workspace somewhere specific:
+
+```bash
+python -m docuforge --workspace /path/to/workspace
+```
+
+You can also set the `DOCUFORGE_WORKSPACE` environment variable.
+
+## Using it
+
+Open a PDF, then use the page rail to select and arrange pages. Changes appear
+in the main viewer immediately, but the imported file stays untouched until
+you choose **Save**.
+
+**Save** creates a new version in the workspace. **Download PDF** downloads the
+current saved version. If you have unsaved changes, the button becomes
+**Save and download** and creates a version first.
+
+**Extract** downloads the selected pages as a separate PDF. It does not remove
+them from the document.
+
+Uploads are limited to 256 MiB by default.
+
+## PDF fidelity
+
+PDFs can contain more than pages and text. They may also have links, bookmarks,
+forms, annotations, named destinations, and document-level references.
+
+DocuForge checks the structures it knows how to preserve before accepting a
+saved result. If an operation would leave a dangling link or lose supported
+interactive content, it fails instead of quietly producing a damaged PDF.
+
+This is deliberately conservative. It does not mean every PDF feature is
+supported or that every document can be transformed.
+
+## Local by design
+
+DocuForge is a single-user desktop-style app served from a local FastAPI
+process. It only binds to loopback addresses and rejects non-local hosts and
+cross-origin browser mutations.
+
+It has no accounts or remote-access security model. Do not expose it to a
+network or run it as a shared server.
+
+## Not supported
+
+- Creating highlights, comments, drawings, or other annotations
+- OCR for scanned documents
+- Editing text or images already inside a PDF page
+- Collaboration or multi-user workspaces
+- General-purpose remote deployment
+
+DocuForge is a page editor, not a full PDF authoring suite.
+
+## How it works
+
+- [FastAPI](https://fastapi.tiangolo.com/) serves the editor and local API
+- [PDF.js](https://mozilla.github.io/pdf.js/) renders documents in the browser
+- [pikepdf](https://pikepdf.readthedocs.io/) applies PDF transformations
+- [pypdf](https://pypdf.readthedocs.io/) performs independent structural checks
+- SQLite stores document, version, session, and operation metadata
+
+PDF bytes are kept in managed content-addressed storage. Saved versions are
+immutable, so a failed save cannot replace a valid earlier version.
 
 ## Development
 
-```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-.\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\python.exe -m ruff check .
+Create a virtual environment, then install the project and development tools:
+
+```bash
+python -m pip install -e .
+python -m pip install -r requirements-dev.txt
 ```
 
-Browser tests also require Chromium:
+Run the backend tests and lint checks:
 
-```powershell
-.\.venv\Scripts\python.exe -m playwright install chromium
-.\.venv\Scripts\python.exe -m pytest -q -m browser
+```bash
+python -m pytest -q -m "not browser"
+python -m ruff check .
 ```
 
-## Licensing
+Browser tests use Chromium:
 
-DocuForge source is available under the MIT License. PDF.js is redistributed
-under Apache-2.0. Selected Lucide icon paths are redistributed under ISC and,
-where derived from Feather, MIT terms. See
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the license texts retained
-with the vendored assets.
+```bash
+python -m playwright install chromium
+python -m pytest -q -m browser
+```
+
+## License
+
+MIT © DavidoffichW
+
+PDF.js, Lucide, pikepdf, qpdf, pypdf, and other dependencies retain their own
+licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the license
+files shipped with the vendored browser assets.
