@@ -54,6 +54,32 @@ def build_pdf(
     return output.getvalue()
 
 
+def build_table_pdf() -> bytes:
+    output = io.BytesIO()
+    pdf = canvas.Canvas(output, pagesize=letter, pageCompression=1)
+    rows = [["Name", "Qty", "Value"], ["Alpha", "2", "=1+1"], ["Beta", "3", "11"]]
+    x0, y0 = 72, 700
+    widths = (150, 90, 110)
+    row_height = 28
+    x_positions = [x0]
+    for width in widths:
+        x_positions.append(x_positions[-1] + width)
+    for x in x_positions:
+        pdf.line(x, y0, x, y0 - len(rows) * row_height)
+    for row_index in range(len(rows) + 1):
+        y = y0 - row_index * row_height
+        pdf.line(x0, y, x_positions[-1], y)
+    pdf.setFont("Helvetica", 10)
+    for row_index, row in enumerate(rows):
+        x = x0 + 6
+        for column_index, value in enumerate(row):
+            pdf.drawString(x, y0 - row_index * row_height - 18, value)
+            x += widths[column_index]
+    pdf.showPage()
+    pdf.save()
+    return output.getvalue()
+
+
 @pytest.fixture
 def pdf_bytes() -> bytes:
     return build_pdf()
@@ -67,6 +93,11 @@ def interactive_pdf_bytes() -> bytes:
 @pytest.fixture
 def large_pdf_bytes() -> bytes:
     return build_pdf(pages=30)
+
+
+@pytest.fixture
+def table_pdf_bytes() -> bytes:
+    return build_table_pdf()
 
 
 @pytest.fixture

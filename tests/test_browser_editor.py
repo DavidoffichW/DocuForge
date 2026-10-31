@@ -3,6 +3,8 @@ from __future__ import annotations
 import socket
 import threading
 import time
+import zipfile
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -294,3 +296,56 @@ def test_browser_extract_and_large_document_navigation(
         page.locator("#extract-pages").click()
     download = download_info.value
     assert download.suggested_filename == "extracted-pages.pdf"
+
+
+@pytest.mark.browser
+def test_browser_table_detection_export_and_batch_isolation(
+    browser,
+    live_editor: str,
+    table_pdf_bytes: bytes,
+) -> None:
+    page = browser.new_page(viewport={"width": 1440, "height": 900})
+    page.goto(live_editor)
+    page.locator("#open-file").set_input_files(
+        {
+            "name": "tables.pdf",
+            "mimeType": "application/pdf",
+            "buffer": table_pdf_bytes,
+        }
+    )
+    expect(page.locator("#viewer .page")).to_have_count(1, timeout=15_000)
+    page.locator("#tables-button").click()
+    expect(page.locator("#etl-panel")).to_be_visible()
+    page.locator("#detect-tables").click()
+    expect(page.locator(".table-candidate")).to_have_count(1, timeout=15_000)
+    expect(page.locator(".table-candidate")).to_contain_text("3 × 3 · pdfplumber")
+    expect(page.locator(".table-preview")).to_contain_text("Alpha")
+    page.locator(".table-candidate input").check()
+    with page.expect_download(timeout=15_000) as download_info:
+        page.locator("[data-table-export='csv']").click()
+    csv_download = download_info.value
+    assert csv_download.suggested_filename == "docuforge-tables.csv"
+    assert "'=1+1" in Path(csv_download.path()).read_text(encoding="utf-8")
+
+    page.locator("#batch-files").set_input_files(
+        [
+            {
+                "name": "valid.pdf",
+                "mimeType": "application/pdf",
+                "buffer": table_pdf_bytes,
+            },
+            {
+                "name": "broken.pdf",
+                "mimeType": "application/pdf",
+                "buffer": b"not a PDF",
+            },
+        ]
+    )
+    with page.expect_download(timeout=15_000) as batch_info:
+        page.locator("#batch-export").click()
+    batch_download = batch_info.value
+    assert batch_download.suggested_filename == "docuforge-batch-tables.zip"
+    with zipfile.ZipFile(BytesIO(Path(batch_download.path()).read_bytes())) as archive:
+        report = archive.read("batch_report.json").decode("utf-8")
+        assert '"success_count":1' in report
+        assert '"failure_count":1' in report

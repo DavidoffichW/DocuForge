@@ -14,6 +14,8 @@ documents to a hosted service.
 - Save changes as immutable document versions
 - Reopen saved versions after restarting the app
 - Refuse transformations that would discard supported document structures
+- Detect text-based tables and export CSV, JSONL, XLSX, or a reproducible ZIP
+- Run the same table extraction over a bounded batch of uploaded PDFs
 
 The original PDF is never overwritten.
 
@@ -67,7 +69,21 @@ current saved version. If you have unsaved changes, the button becomes
 **Extract** downloads the selected pages as a separate PDF. It does not remove
 them from the document.
 
-Uploads are limited to 256 MiB by default.
+Open **Table tools** from the view bar to inspect tables in the current saved
+version. Select a candidate, choose the whole table or a row, column, or cell,
+then download the structured result. JSONL keeps the extracted text unchanged;
+CSV and XLSX prefix formula-like values so common spreadsheet applications do
+not execute PDF text as a formula.
+
+The batch tool accepts uploaded PDFs—it never reads a server directory supplied
+by the browser. By default it allows 100 files, 50 MiB per file, 250 MiB in
+total, and 2,000 processed pages. A bad file is reported without discarding
+successful results from the rest of the batch. These limits are deliberately
+conservative controls for the in-memory extraction path, not performance
+claims.
+
+Normal document uploads are limited to 256 MiB by default. Table extraction is
+text-based; scanned image-only pages need OCR, which DocuForge does not provide.
 
 ## PDF fidelity
 
@@ -106,6 +122,9 @@ DocuForge is a page editor, not a full PDF authoring suite.
 - [PDF.js](https://mozilla.github.io/pdf.js/) renders documents in the browser
 - [pikepdf](https://pikepdf.readthedocs.io/) applies PDF transformations
 - [pypdf](https://pypdf.readthedocs.io/) performs independent structural checks
+- [pdfplumber](https://github.com/jsvine/pdfplumber) detects tables and provides
+  the text-and-geometry fallback
+- [openpyxl](https://openpyxl.readthedocs.io/) writes XLSX exports
 - SQLite stores document, version, session, and operation metadata
 
 PDF bytes are kept in managed content-addressed storage. Saved versions are
