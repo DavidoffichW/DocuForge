@@ -3,6 +3,7 @@ from __future__ import annotations
 import mimetypes
 import re
 from contextlib import asynccontextmanager
+from io import BytesIO
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlsplit
@@ -18,7 +19,8 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from docuforge import __version__
 from docuforge.config import Settings
-from docuforge.errors import DocuForgeError
+from docuforge.errors import DocuForgeError, DocumentTooLargeError
+from docuforge.etl import BatchInput, ETLService, ExportSelection
 from docuforge.pdf_engine import PdfEngine
 from docuforge.repository import Repository
 from docuforge.service import DocumentManager
@@ -90,6 +92,18 @@ class ExtractRequest(RevisionRequest):
     page_ids: list[str] = Field(min_length=1)
 
 
+class TableSelectionRequest(BaseModel):
+    candidate_id: str = Field(min_length=1, max_length=80)
+    mode: str = "table"
+    row: int | None = Field(default=None, ge=1)
+    column: int | None = Field(default=None, ge=1)
+
+
+class TableExportRequest(BaseModel):
+    format: str = "zip"
+    selections: list[TableSelectionRequest] = Field(min_length=1, max_length=100)
+
+
 def _parse_range(range_header: str | None, size: int) -> tuple[int, int, int]:
     if not range_header:
         return 0, size - 1, 200
@@ -120,6 +134,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     repository = Repository(selected.workspace_root / "docuforge.sqlite3")
     engine = PdfEngine()
     manager = DocumentManager(selected, repository, storage, engine)
+    etl = ETLService(repository, storage, max_pages=selected.etl_max_pages)
     editor_root = Path(__file__).with_name("editor")
 
     @asynccontextmanager
@@ -139,6 +154,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.repository = repository
     app.state.engine = engine
     app.state.manager = manager
+    app.state.etl = etl
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=list(LOCAL_HOSTS),
@@ -207,7 +223,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "capabilities": {
                 "editor": True,
                 "ocr": False,
-                "table_processing": False,
+                "table_processing": True,
+                "table_providers": ["pdfplumber", "text-grid"],
                 "pdf_engine": "pikepdf",
                 "pikepdf_version": pikepdf.__version__,
                 "pypdf_version": pypdf.__version__,
@@ -272,6 +289,106 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/sessions/{session_id}/extract")
     def extract(session_id: str, payload: ExtractRequest) -> dict[str, Any]:
         return manager.extract(session_id, payload.expected_revision, payload.page_ids)
+
+    @app.post("/api/versions/{version_id}/tables/detect")
+    def detect_version_tables(version_id: str) -> dict[str, Any]:
+        version, detection = etl.detect_version(version_id)
+        return {
+            "version_id": version["id"],
+            "content_sha256": version["content_sha256"],
+            **detection.as_dict(),
+        }
+
+    @app.post("/api/versions/{version_id}/tables/export")
+    def export_version_tables(version_id: str, payload: TableExportRequest):
+        selections = [
+            ExportSelection(
+                candidate_id=selection.candidate_id,
+                mode=selection.mode,
+                row=selection.row,
+                column=selection.column,
+            )
+            for selection in payload.selections
+        ]
+        data, media_type, filename = etl.export_version(
+            version_id, selections, payload.format
+        )
+        return StreamingResponse(
+            BytesIO(data),
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(data)),
+                "Cache-Control": "no-store",
+            },
+        )
+
+    @app.post("/api/tables/batch-export")
+    async def batch_export(
+        files: Annotated[list[UploadFile], File()],
+        page: Annotated[int, Form()] = 1,
+        table: Annotated[int, Form()] = 1,
+        mode: Annotated[str, Form()] = "table",
+        row: Annotated[int | None, Form()] = None,
+        column: Annotated[int | None, Form()] = None,
+        include_xlsx: Annotated[bool, Form()] = True,
+    ):
+        if not files:
+            raise ValueError("select at least one PDF")
+        if len(files) > selected.etl_max_files:
+            raise DocumentTooLargeError(
+                f"batch contains {len(files)} files; limit is {selected.etl_max_files}"
+            )
+        inputs: list[BatchInput] = []
+        total_bytes = 0
+        for upload in files:
+            raw_name = Path(upload.filename or "document.pdf").name
+            filename = re.sub(r"[\x00-\x1f\x7f]", "", raw_name)[:180] or "document.pdf"
+            output = BytesIO()
+            file_bytes = 0
+            too_large = False
+            while chunk := await upload.read(selected.stream_chunk_bytes):
+                file_bytes += len(chunk)
+                total_bytes += len(chunk)
+                if total_bytes > selected.etl_max_total_bytes:
+                    raise DocumentTooLargeError(
+                        f"batch exceeds the {selected.etl_max_total_bytes}-byte total limit"
+                    )
+                if file_bytes > selected.etl_max_file_bytes:
+                    too_large = True
+                    break
+                output.write(chunk)
+            await upload.close()
+            if too_large:
+                inputs.append(
+                    BatchInput(
+                        filename=filename,
+                        data=None,
+                        error=f"file exceeds the {selected.etl_max_file_bytes}-byte limit",
+                    )
+                )
+            else:
+                inputs.append(BatchInput(filename=filename, data=output.getvalue()))
+        data, report = etl.batch_export(
+            inputs,
+            page=page,
+            table_index=table,
+            mode=mode,
+            row=row,
+            column=column,
+            include_xlsx=include_xlsx,
+        )
+        return StreamingResponse(
+            BytesIO(data),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": 'attachment; filename="docuforge-batch-tables.zip"',
+                "Content-Length": str(len(data)),
+                "Cache-Control": "no-store",
+                "X-DocuForge-Batch-Success": str(report["success_count"]),
+                "X-DocuForge-Batch-Failure": str(report["failure_count"]),
+            },
+        )
 
     def pdf_response(digest: str, byte_size: int, range_header: str | None):
         try:

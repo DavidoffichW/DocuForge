@@ -1,6 +1,8 @@
-fastapi>=0.115,<1
-pikepdf>=10.17,<11
-pydantic>=2.10,<3
-pypdf>=6,<7
-python-multipart>=0.0.20,<1
-uvicorn>=0.34,<1
+fastapi
+openpyxl
+pdfplumber
+pikepdf
+pydantic
+pypdf
+python-multipart
+uvicorn
