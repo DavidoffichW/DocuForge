@@ -72,6 +72,12 @@ class Repository:
                 );
                 CREATE INDEX IF NOT EXISTS idx_versions_document
                     ON versions(document_id, created_at);
+                CREATE TABLE IF NOT EXISTS document_sources (
+                    document_id TEXT NOT NULL REFERENCES documents(id),
+                    position INTEGER NOT NULL,
+                    source_version_id TEXT NOT NULL REFERENCES versions(id),
+                    PRIMARY KEY(document_id, position)
+                );
                 CREATE TABLE IF NOT EXISTS sessions (
                     id TEXT PRIMARY KEY,
                     workspace_id TEXT NOT NULL REFERENCES workspaces(id),
@@ -179,6 +185,8 @@ class Repository:
         digest: str,
         byte_size: int,
         page_count: int,
+        reason: str = "import",
+        source_version_ids: list[str] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         document_id = uuid.uuid4().hex
         version_id = uuid.uuid4().hex
@@ -194,10 +202,24 @@ class Repository:
                 INSERT INTO versions(
                     id, document_id, version_number, parent_version_id, content_sha256,
                     byte_size, page_count, reason, created_at
-                ) VALUES (?, ?, 1, NULL, ?, ?, ?, 'import', ?)
+                ) VALUES (?, ?, 1, NULL, ?, ?, ?, ?, ?)
                 """,
-                (version_id, document_id, digest, byte_size, page_count, created),
+                (
+                    version_id,
+                    document_id,
+                    digest,
+                    byte_size,
+                    page_count,
+                    reason,
+                    created,
+                ),
             )
+            for position, source_version_id in enumerate(source_version_ids or []):
+                connection.execute(
+                    "INSERT INTO document_sources(document_id, position, source_version_id) "
+                    "VALUES (?, ?, ?)",
+                    (document_id, position, source_version_id),
+                )
             connection.commit()
         return self.get_document(document_id), self.get_version(version_id)
 
@@ -254,6 +276,20 @@ class Repository:
                        byte_size, page_count, reason, created_at
                 FROM versions WHERE document_id = ?
                 ORDER BY created_at, rowid
+                """,
+                (document_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_document_sources(self, document_id: str) -> list[dict[str, Any]]:
+        self.get_document(document_id)
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT position, source_version_id
+                FROM document_sources
+                WHERE document_id = ?
+                ORDER BY position
                 """,
                 (document_id,),
             ).fetchall()

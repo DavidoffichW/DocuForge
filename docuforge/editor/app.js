@@ -27,6 +27,9 @@ const state = {
   viewerGeneration: 0,
   mutationQueue: Promise.resolve(),
   draggedPageId: null,
+  tableCandidates: [],
+  documents: [],
+  mergeSources: [],
 };
 
 const eventBus = new EventBus();
@@ -78,14 +81,18 @@ async function api(path, options = {}) {
   return type.includes("application/json") ? response.json() : response;
 }
 
+async function importManagedFile(file) {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  form.append("title", file.name);
+  return api(`/api/workspaces/${state.workspaceId}/documents`, { method: "POST", body: form });
+}
+
 async function openFile(file) {
   if (!file) return;
   busy(true, "Validating and importing PDF…");
   try {
-    const form = new FormData();
-    form.append("file", file, file.name);
-    form.append("title", file.name);
-    const imported = await api(`/api/workspaces/${state.workspaceId}/documents`, { method: "POST", body: form });
+    const imported = await importManagedFile(file);
     await openDocument(imported.document.id, imported.version.id);
     status(`Imported ${imported.pdf.page_count} pages`);
     await refreshDocuments();
@@ -105,6 +112,7 @@ async function openDocument(documentId, versionId = null) {
     state.version = version;
     state.session = session;
     state.selected.clear();
+    resetTableTools();
     await loadPdf(`/api/versions/${version.id}/content`);
     await renderSession({ focusPageId: session.pages[0]?.id, resetScale: true });
     status(`Opened ${document.title}`);
@@ -250,6 +258,7 @@ async function renderSession(viewOptions = {}) {
   $("#redo-button").disabled = !session.redo.length;
   renderThumbnails();
   updateSelectionControls();
+  updateTableControls();
   await applySessionToViewer(viewOptions);
 }
 
@@ -431,6 +440,7 @@ async function save(downloadAfter = false) {
       });
       state.version = result.version;
       state.session = result.session;
+      resetTableTools();
       await loadPdf(`/api/versions/${state.version.id}/content`);
       await renderSession({ focusPageId: state.session.pages[0]?.id, resetScale: true });
       status(`Saved immutable version ${state.version.version_number}`);
@@ -489,6 +499,7 @@ function confirmDelete() {
 async function refreshDocuments() {
   try {
     const documents = await api(`/api/workspaces/${state.workspaceId}/documents`);
+    state.documents = documents;
     const list = $("#document-list");
     list.replaceChildren();
     for (const document of documents) {
@@ -500,7 +511,277 @@ async function refreshDocuments() {
       card.addEventListener("click", () => openDocument(document.id, document.latest_version_id));
       list.append(card);
     }
+    refreshMergePicker();
   } catch (error) { toast(error.message, "error"); }
+}
+
+function refreshMergePicker() {
+  const picker = $("#merge-document-select");
+  picker.replaceChildren();
+  for (const document of state.documents) {
+    const option = window.document.createElement("option");
+    option.value = document.latest_version_id;
+    option.textContent = `${document.title} · ${document.page_count} pages`;
+    picker.append(option);
+  }
+  $("#merge-add-document").disabled = !state.documents.length;
+  renderMergeQueue();
+}
+
+function renderMergeQueue() {
+  const list = $("#merge-queue");
+  list.replaceChildren();
+  state.mergeSources.forEach((source, index) => {
+    const item = window.document.createElement("li");
+    const label = window.document.createElement("span");
+    label.textContent = `${source.title} · ${source.pageCount} pages`;
+    const controls = window.document.createElement("span");
+    controls.className = "merge-order-controls";
+    for (const [text, delta, action] of [["↑", -1, "Move up"], ["↓", 1, "Move down"]]) {
+      const button = window.document.createElement("button");
+      button.type = "button";
+      button.textContent = text;
+      button.setAttribute("aria-label", `${action} ${source.title}`);
+      button.disabled = index + delta < 0 || index + delta >= state.mergeSources.length;
+      button.addEventListener("click", () => {
+        const next = index + delta;
+        [state.mergeSources[index], state.mergeSources[next]] = [state.mergeSources[next], state.mergeSources[index]];
+        renderMergeQueue();
+      });
+      controls.append(button);
+    }
+    const remove = window.document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", `Remove ${source.title} from merge`);
+    remove.addEventListener("click", () => {
+      state.mergeSources.splice(index, 1);
+      renderMergeQueue();
+    });
+    controls.append(remove);
+    item.append(label, controls);
+    list.append(item);
+  });
+  $("#merge-documents").disabled = state.mergeSources.length < 2;
+}
+
+function addMergeSource(source) {
+  state.mergeSources.push(source);
+  renderMergeQueue();
+}
+
+function addSelectedMergeDocument() {
+  const versionId = $("#merge-document-select").value;
+  const document = state.documents.find((item) => item.latest_version_id === versionId);
+  if (!document) return;
+  addMergeSource({
+    versionId,
+    title: document.title,
+    pageCount: document.page_count,
+  });
+}
+
+async function importMergeFiles(files) {
+  if (!files.length) return;
+  busy(true, `Importing ${files.length} PDF${files.length === 1 ? "" : "s"}…`);
+  try {
+    for (const file of files) {
+      const imported = await importManagedFile(file);
+      addMergeSource({
+        versionId: imported.version.id,
+        title: imported.document.title,
+        pageCount: imported.version.page_count,
+      });
+    }
+    await refreshDocuments();
+    status(`Imported ${files.length} merge source${files.length === 1 ? "" : "s"}`);
+  } catch (error) {
+    toast(error.message, "error");
+    status("Merge-source import failed");
+  } finally {
+    busy(false);
+    $("#merge-files").value = "";
+  }
+}
+
+async function mergeDocuments() {
+  if (state.mergeSources.length < 2) return;
+  busy(true, `Merging ${state.mergeSources.length} PDFs…`);
+  try {
+    const result = await api(`/api/workspaces/${state.workspaceId}/documents/merge`, {
+      method: "POST",
+      body: JSON.stringify({
+        title: $("#merge-title").value || "Merged document.pdf",
+        version_ids: state.mergeSources.map((source) => source.versionId),
+      }),
+    });
+    state.mergeSources = [];
+    renderMergeQueue();
+    await refreshDocuments();
+    await openDocument(result.document.id, result.version.id);
+    status(`Merged ${result.source_version_ids.length} PDFs into ${result.version.page_count} pages`);
+    toast("Merged document created", "success");
+  } catch (error) {
+    toast(error.message, "error");
+    status("Merge failed · source documents were not changed");
+  } finally { busy(false); }
+}
+
+function resetTableTools() {
+  state.tableCandidates = [];
+  const list = $("#table-candidates");
+  if (list) list.replaceChildren();
+  updateTableControls();
+}
+
+function updateTableControls() {
+  const hasSavedVersion = Boolean(state.version);
+  const dirty = Boolean(state.session?.dirty);
+  const detect = $("#detect-tables");
+  if (!detect) return;
+  detect.disabled = !hasSavedVersion || dirty;
+  const help = $("#etl-document-help");
+  if (!hasSavedVersion) help.textContent = "Open a PDF, then detect tables in its saved version.";
+  else if (dirty) help.textContent = "Save pending page changes before extracting tables.";
+  else if (state.tableCandidates.length) help.textContent = `${state.tableCandidates.length} table candidate${state.tableCandidates.length === 1 ? "" : "s"} found.`;
+  else help.textContent = "Detection checks each page with pdfplumber, then uses a text-grid fallback.";
+  const selected = all(".table-candidate input:checked").length > 0;
+  all("[data-table-export]").forEach((button) => { button.disabled = !selected; });
+}
+
+function tablePreview(candidate) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "table-preview";
+  const table = document.createElement("table");
+  const body = document.createElement("tbody");
+  candidate.grid.slice(0, 5).forEach((values) => {
+    const row = document.createElement("tr");
+    values.slice(0, 6).forEach((value) => {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      cell.title = value;
+      row.append(cell);
+    });
+    body.append(row);
+  });
+  table.append(body);
+  wrapper.append(table);
+  return wrapper;
+}
+
+function renderTableCandidates() {
+  const list = $("#table-candidates");
+  list.replaceChildren();
+  state.tableCandidates.forEach((candidate) => {
+    const label = document.createElement("label");
+    label.className = "table-candidate";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = candidate.id;
+    checkbox.setAttribute("aria-label", `Select table ${candidate.table_index + 1} on page ${candidate.page_number}`);
+    checkbox.addEventListener("change", updateTableControls);
+    const copy = document.createElement("span");
+    const title = document.createElement("strong");
+    title.textContent = `Page ${candidate.page_number} · table ${candidate.table_index + 1}`;
+    const detail = document.createElement("small");
+    detail.textContent = `${candidate.row_count} × ${candidate.column_count} · ${candidate.provider}`;
+    copy.append(title, detail);
+    label.append(checkbox, copy, tablePreview(candidate));
+    list.append(label);
+  });
+  updateTableControls();
+}
+
+async function detectCurrentTables() {
+  if (!state.version || state.session?.dirty) return;
+  busy(true, "Detecting tables…");
+  try {
+    const result = await api(`/api/versions/${state.version.id}/tables/detect`, { method: "POST" });
+    state.tableCandidates = result.candidates;
+    renderTableCandidates();
+    const message = result.status === "NO_TABLE"
+      ? "No text-based tables were found"
+      : `Found ${result.candidates.length} table candidate${result.candidates.length === 1 ? "" : "s"}`;
+    status(message);
+    toast(message, result.status === "FAILED" ? "error" : "success");
+  } catch (error) {
+    resetTableTools();
+    toast(error.message, "error");
+    status("Table detection failed");
+  } finally { busy(false); }
+}
+
+function selectedTablePayload() {
+  const mode = $("#table-slice-mode").value;
+  const row = Number($("#table-slice-row").value);
+  const column = Number($("#table-slice-column").value);
+  return all(".table-candidate input:checked").map((input) => ({
+    candidate_id: input.value,
+    mode,
+    row: mode === "row" || mode === "cell" ? row : null,
+    column: mode === "column" || mode === "cell" ? column : null,
+  }));
+}
+
+function responseFilename(response, fallback) {
+  const disposition = response.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename="([^"]+)"/i);
+  return match?.[1] || fallback;
+}
+
+async function downloadResponse(response, fallback) {
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  download(url, responseFilename(response, fallback));
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function exportSelectedTables(format) {
+  const selections = selectedTablePayload();
+  if (!state.version || !selections.length) return;
+  busy(true, `Building ${format.toUpperCase()} export…`);
+  try {
+    const response = await api(`/api/versions/${state.version.id}/tables/export`, {
+      method: "POST",
+      body: JSON.stringify({ format, selections }),
+    });
+    await downloadResponse(response, `docuforge-tables.${format}`);
+    status(`Downloaded ${format.toUpperCase()} table export`);
+    toast("Table export ready", "success");
+  } catch (error) { toast(error.message, "error"); status("Table export failed"); }
+  finally { busy(false); }
+}
+
+function updateSliceFields() {
+  const mode = $("#table-slice-mode").value;
+  $("#slice-row-field").hidden = mode !== "row" && mode !== "cell";
+  $("#slice-column-field").hidden = mode !== "column" && mode !== "cell";
+}
+
+async function exportBatchTables() {
+  const files = [...$("#batch-files").files, ...$("#batch-folder").files];
+  if (!files.length) {
+    toast("Choose one or more PDFs for the batch", "error");
+    return;
+  }
+  const form = new FormData();
+  files.forEach((file) => form.append("files", file, file.name));
+  form.append("page", $("#batch-page").value);
+  form.append("table", $("#batch-table").value);
+  form.append("mode", "table");
+  form.append("include_xlsx", "true");
+  busy(true, `Processing ${files.length} PDFs…`);
+  try {
+    const response = await api("/api/tables/batch-export", { method: "POST", body: form });
+    const success = response.headers.get("x-docuforge-batch-success") || "0";
+    const failure = response.headers.get("x-docuforge-batch-failure") || "0";
+    await downloadResponse(response, "docuforge-batch-tables.zip");
+    status(`Batch complete · ${success} succeeded · ${failure} failed`);
+    toast(`Batch ready · ${success} succeeded · ${failure} failed`, failure === "0" ? "success" : "info");
+    $("#batch-files").value = "";
+    $("#batch-folder").value = "";
+  } catch (error) { toast(error.message, "error"); status("Batch export failed"); }
+  finally { busy(false); }
 }
 
 eventBus.on("pagesinit", () => { viewer.currentScaleValue = "page-width"; });
@@ -556,6 +837,22 @@ $("#delete-pages").addEventListener("click", async () => {
 });
 $("#extract-pages").addEventListener("click", extractSelected);
 $("#refresh-documents").addEventListener("click", refreshDocuments);
+$("#merge-files").addEventListener("change", (event) => importMergeFiles([...event.target.files]));
+$("#merge-add-document").addEventListener("click", addSelectedMergeDocument);
+$("#merge-documents").addEventListener("click", mergeDocuments);
+function setTablePanel(open) {
+  $("#etl-panel").hidden = !open;
+  $(".workspace-shell").classList.toggle("etl-open", open);
+  $("#tables-button").setAttribute("aria-expanded", String(open));
+}
+$("#tables-button").addEventListener("click", () => setTablePanel($("#etl-panel").hidden));
+$("#close-etl-panel").addEventListener("click", () => setTablePanel(false));
+$("#detect-tables").addEventListener("click", detectCurrentTables);
+$("#table-slice-mode").addEventListener("change", updateSliceFields);
+all("[data-table-export]").forEach((button) => button.addEventListener(
+  "click", () => exportSelectedTables(button.dataset.tableExport),
+));
+$("#batch-export").addEventListener("click", exportBatchTables);
 $("#theme-button").addEventListener("click", () => {
   const root = document.documentElement;
   setTheme(root.dataset.theme === "dark" ? "light" : "dark");
@@ -595,5 +892,7 @@ function setTheme(theme) {
 $(".toast-close").addEventListener("click", () => { $("#toast").hidden = true; });
 try { setTheme(localStorage.getItem("docuforge-theme") || "dark"); } catch (_) { setTheme("dark"); }
 
+updateSliceFields();
+updateTableControls();
 refreshDocuments();
 status("Ready · local workspace");

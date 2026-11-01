@@ -5,7 +5,7 @@ import io
 
 import pytest
 
-from docuforge.errors import InvalidDocumentError, RevisionConflictError
+from docuforge.errors import FidelityError, InvalidDocumentError, RevisionConflictError
 from docuforge.pdf_engine import PdfEngine, inspect_semantics
 from docuforge.repository import Repository
 from docuforge.service import DocumentManager
@@ -90,6 +90,67 @@ def test_workspace_and_document_identities_are_independent(
     document_b = import_fixture(manager, pdf_bytes, workspace_b["id"])["document"]
     assert document_a["id"] != document_b["id"]
     assert document_a["workspace_id"] != document_b["workspace_id"]
+
+
+def test_merge_versions_creates_managed_document_and_preserves_sources(
+    manager: DocumentManager,
+    pdf_bytes: bytes,
+    table_pdf_bytes: bytes,
+) -> None:
+    first = import_fixture(manager, pdf_bytes)
+    second = manager.import_pdf(
+        workspace_id="default",
+        title="tables.pdf",
+        stream=io.BytesIO(table_pdf_bytes),
+    )
+    source_hashes = [
+        first["version"]["content_sha256"],
+        second["version"]["content_sha256"],
+    ]
+
+    merged = manager.merge_versions(
+        workspace_id="default",
+        title="combined.pdf",
+        version_ids=[second["version"]["id"], first["version"]["id"]],
+    )
+
+    assert merged["document"]["title"] == "combined.pdf"
+    assert merged["version"]["reason"] == "merge"
+    assert merged["version"]["page_count"] == 4
+    assert merged["source_version_ids"] == [
+        second["version"]["id"],
+        first["version"]["id"],
+    ]
+    assert manager.repository.list_document_sources(merged["document"]["id"]) == [
+        {"position": 0, "source_version_id": second["version"]["id"]},
+        {"position": 1, "source_version_id": first["version"]["id"]},
+    ]
+    assert len(manager.repository.list_documents("default")) == 3
+    for digest in source_hashes:
+        assert manager.storage.blob_path(digest).exists()
+
+    restarted = Repository(manager.repository.database_path)
+    reopened = restarted.get_version(merged["version"]["id"])
+    assert reopened["content_sha256"] == merged["version"]["content_sha256"]
+    assert [
+        source["source_version_id"]
+        for source in restarted.list_document_sources(merged["document"]["id"])
+    ] == merged["source_version_ids"]
+
+
+def test_failed_fidelity_merge_does_not_create_document(
+    manager: DocumentManager,
+    interactive_pdf_bytes: bytes,
+) -> None:
+    imported = import_fixture(manager, interactive_pdf_bytes)
+    before = manager.repository.list_documents("default")
+    with pytest.raises(FidelityError):
+        manager.merge_versions(
+            workspace_id="default",
+            title="blocked.pdf",
+            version_ids=[imported["version"]["id"], imported["version"]["id"]],
+        )
+    assert manager.repository.list_documents("default") == before
 
 
 def test_invalid_and_oversized_uploads_leave_no_document(manager: DocumentManager) -> None:

@@ -4,19 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "docuforge"
-version = "0.1.0"
-description = "Local-first PDF viewing and page-organization workspace"
+version = "0.2.0"
+description = "Local-first PDF workspace for page operations, faithful merging, and table extraction"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 dependencies = [
-  "fastapi>=0.115,<1",
-  "pikepdf>=10.17,<11",
-  "pydantic>=2.10,<3",
-  "pypdf>=6,<7",
-  "python-multipart>=0.0.20,<1",
-  "uvicorn>=0.34,<1",
+  "fastapi",
+  "openpyxl",
+  "pdfplumber",
+  "pikepdf",
+  "pydantic",
+  "pypdf",
+  "python-multipart",
+  "uvicorn",
 ]
 
 [project.scripts]

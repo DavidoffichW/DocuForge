@@ -36,6 +36,28 @@ and fidelity verification.
 
 Source: <https://github.com/py-pdf/pypdf>
 
+## pdfplumber and PDFMiner.six
+
+DocuForge uses pdfplumber and PDFMiner.six under the MIT License for table,
+text, and page-geometry extraction. Their source distributions and wheels
+retain the applicable license files.
+
+- pdfplumber: <https://github.com/jsvine/pdfplumber>
+- PDFMiner.six: <https://github.com/pdfminer/pdfminer.six>
+
+pdfplumber currently installs pypdfium2 as a runtime dependency. pypdfium2 is
+available under BSD-3-Clause or Apache-2.0 terms and its wheel carries PDFium
+and bundled third-party license notices. DocuForge does not use PDFium as its
+editor or transformation authority.
+
+Source: <https://github.com/pypdfium2-team/pypdfium2>
+
+## openpyxl
+
+DocuForge uses openpyxl under the MIT License to create XLSX table exports.
+
+Source: <https://foss.heptapod.net/openpyxl/openpyxl>
+
 The dependency inventory must be rechecked before each public release. This
 notice is not a substitute for the license files distributed with installed
 dependencies.

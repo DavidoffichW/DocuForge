@@ -1,4 +1,6 @@
 include LICENSE
 include README.md
+include FEATURE_PARITY.md
+include RELEASE_NOTES.md
 include THIRD_PARTY_NOTICES.md
 recursive-include tests *.py

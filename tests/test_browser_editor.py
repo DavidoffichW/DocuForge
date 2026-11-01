@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import re
 import socket
 import threading
 import time
+import zipfile
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -294,3 +297,100 @@ def test_browser_extract_and_large_document_navigation(
         page.locator("#extract-pages").click()
     download = download_info.value
     assert download.suggested_filename == "extracted-pages.pdf"
+
+
+@pytest.mark.browser
+def test_browser_table_detection_export_and_batch_isolation(
+    browser,
+    live_editor: str,
+    table_pdf_bytes: bytes,
+) -> None:
+    page = browser.new_page(viewport={"width": 1440, "height": 900})
+    page.goto(live_editor)
+    page.locator("#open-file").set_input_files(
+        {
+            "name": "tables.pdf",
+            "mimeType": "application/pdf",
+            "buffer": table_pdf_bytes,
+        }
+    )
+    expect(page.locator("#viewer .page")).to_have_count(1, timeout=15_000)
+    page.locator("#tables-button").click()
+    expect(page.locator("#etl-panel")).to_be_visible()
+    page.locator("#detect-tables").click()
+    expect(page.locator(".table-candidate")).to_have_count(1, timeout=15_000)
+    expect(page.locator(".table-candidate")).to_contain_text("3 × 3 · pdfplumber")
+    expect(page.locator(".table-preview")).to_contain_text("Alpha")
+    page.locator(".table-candidate input").check()
+    with page.expect_download(timeout=15_000) as download_info:
+        page.locator("[data-table-export='csv']").click()
+    csv_download = download_info.value
+    assert csv_download.suggested_filename == "docuforge-tables.csv"
+    assert "'=1+1" in Path(csv_download.path()).read_text(encoding="utf-8")
+
+    page.locator("#batch-files").set_input_files(
+        [
+            {
+                "name": "valid.pdf",
+                "mimeType": "application/pdf",
+                "buffer": table_pdf_bytes,
+            },
+            {
+                "name": "broken.pdf",
+                "mimeType": "application/pdf",
+                "buffer": b"not a PDF",
+            },
+        ]
+    )
+    with page.expect_download(timeout=15_000) as batch_info:
+        page.locator("#batch-export").click()
+    batch_download = batch_info.value
+    assert batch_download.suggested_filename == "docuforge-batch-tables.zip"
+    with zipfile.ZipFile(BytesIO(Path(batch_download.path()).read_bytes())) as archive:
+        report = archive.read("batch_report.json").decode("utf-8")
+        assert '"success_count":1' in report
+        assert '"failure_count":1' in report
+
+
+@pytest.mark.browser
+def test_browser_imports_orders_merges_and_reopens_documents(
+    browser,
+    live_editor: str,
+    pdf_bytes: bytes,
+    table_pdf_bytes: bytes,
+) -> None:
+    page = browser.new_page(viewport={"width": 1440, "height": 900})
+    page.goto(live_editor)
+    page.locator(".tab[data-panel='documents-panel']").click()
+    page.locator("#merge-files").set_input_files(
+        [
+            {
+                "name": "fixture.pdf",
+                "mimeType": "application/pdf",
+                "buffer": pdf_bytes,
+            },
+            {
+                "name": "tables.pdf",
+                "mimeType": "application/pdf",
+                "buffer": table_pdf_bytes,
+            },
+        ]
+    )
+    expect(page.locator("#merge-queue li")).to_have_count(2, timeout=15_000)
+    page.locator("#merge-queue li").nth(1).get_by_role("button", name="Move up").click()
+    expect(page.locator("#merge-queue li").first).to_contain_text("tables.pdf")
+    page.locator("#merge-title").fill("research-bundle.pdf")
+    page.locator("#merge-documents").click()
+
+    expect(page.locator("#document-title")).to_have_text("research-bundle.pdf", timeout=20_000)
+    expect(page.locator("#viewer .page")).to_have_count(4, timeout=20_000)
+    expect(page.locator("#viewer .page").first.locator(".textLayer")).to_contain_text("Name")
+    expect(page.locator("#viewer .page").nth(1).locator(".textLayer")).to_contain_text(
+        "Fixture page 1"
+    )
+
+    page.reload()
+    page.locator(".tab[data-panel='documents-panel']").click()
+    expect(page.locator(".document-card")).to_have_count(3)
+    page.get_by_role("button", name=re.compile("research-bundle.pdf")).click()
+    expect(page.locator("#viewer .page")).to_have_count(4, timeout=20_000)
