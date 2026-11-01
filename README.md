@@ -1,10 +1,10 @@
 # DocuForge
 
-> A local PDF workspace for organizing pages and keeping changes as saved versions.
+> A local PDF workspace for organizing documents, preserving versions, and extracting tables.
 
-DocuForge gives you a clean place to open a PDF, find your way around it, move
-pages, and save the result. It runs on your machine and does not send your
-documents to a hosted service.
+DocuForge gives you one place to inspect PDFs, organize their pages, combine
+documents, and turn detected tables into structured files. It runs on your
+machine and does not send documents to a hosted service.
 
 ## What it does
 
@@ -13,6 +13,7 @@ documents to a hosted service.
 - Undo and redo page changes before saving
 - Save changes as immutable document versions
 - Reopen saved versions after restarting the app
+- Merge saved documents or newly selected PDFs in a chosen order
 - Refuse transformations that would discard supported document structures
 - Detect text-based tables and export CSV, JSONL, XLSX, or a reproducible ZIP
 - Run the same table extraction over a bounded batch of uploaded PDFs
@@ -62,6 +63,12 @@ Open a PDF, then use the page rail to select and arrange pages. Changes appear
 in the main viewer immediately, but the imported file stays untouched until
 you choose **Save**.
 
+Open the document library to merge PDFs. You can import several local files or
+add existing managed versions, arrange the source order, and create a new
+document. Merge uses the same structural fidelity checks as page editing. A
+blocked merge leaves every source document untouched and does not create a
+partially successful result.
+
 **Save** creates a new version in the workspace. **Download PDF** downloads the
 current saved version. If you have unsaved changes, the button becomes
 **Save and download** and creates a version first.
@@ -75,12 +82,15 @@ then download the structured result. JSONL keeps the extracted text unchanged;
 CSV and XLSX prefix formula-like values so common spreadsheet applications do
 not execute PDF text as a formula.
 
-The batch tool accepts uploaded PDFs—it never reads a server directory supplied
-by the browser. By default it allows 100 files, 50 MiB per file, 250 MiB in
-total, and 2,000 processed pages. A bad file is reported without discarding
-successful results from the rest of the batch. These limits are deliberately
-conservative controls for the in-memory extraction path, not performance
-claims.
+The batch tool accepts multiple uploaded PDFs and, in browsers that support it,
+a locally selected folder. It never accepts a server filesystem path. By
+default it allows 100 files, 50 MiB per file, 250 MiB in total, and 2,000
+processed pages. A bad file is reported without discarding successful results
+from the rest of the batch. These limits are deliberately conservative controls
+for the in-memory extraction path, not performance claims.
+
+Merge is separately bounded to 50 managed source versions, 512 MiB of source
+bytes, and 5,000 pages by default.
 
 Normal document uploads are limited to 256 MiB by default. Table extraction is
 text-based; scanned image-only pages need OCR, which DocuForge does not provide.
@@ -129,6 +139,11 @@ DocuForge is a page editor, not a full PDF authoring suite.
 
 PDF bytes are kept in managed content-addressed storage. Saved versions are
 immutable, so a failed save cannot replace a valid earlier version.
+
+The table and batch workflows were consolidated from the earlier PDF ETL
+Toolkit after their behavior was reimplemented and qualified in this workspace.
+The [feature-parity record](FEATURE_PARITY.md) documents the accepted interface
+differences and remaining limits.
 
 ## Development
 

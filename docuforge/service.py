@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 from docuforge.config import Settings
-from docuforge.errors import InvalidDocumentError
+from docuforge.errors import DocumentTooLargeError, InvalidDocumentError
 from docuforge.page_commands import apply_page_command
 from docuforge.pdf_engine import PdfEngine
 from docuforge.repository import Repository
@@ -58,6 +58,64 @@ class DocumentManager:
 
     def create_session(self, document_id: str, version_id: str | None = None) -> dict[str, Any]:
         return self.repository.create_session(document_id, version_id)
+
+    def merge_versions(
+        self,
+        *,
+        workspace_id: str,
+        title: str,
+        version_ids: list[str],
+    ) -> dict[str, Any]:
+        self.repository.get_workspace(workspace_id)
+        if len(version_ids) < 2:
+            raise ValueError("select at least two PDF versions to merge")
+        if len(version_ids) > self.settings.merge_max_files:
+            raise DocumentTooLargeError(
+                f"merge contains {len(version_ids)} files; "
+                f"limit is {self.settings.merge_max_files}"
+            )
+
+        versions: list[dict[str, Any]] = []
+        source_paths: list[Path] = []
+        total_bytes = 0
+        total_pages = 0
+        for version_id in version_ids:
+            version = self.repository.get_version(version_id)
+            document = self.repository.get_document(version["document_id"])
+            if document["workspace_id"] != workspace_id:
+                raise ValueError("merge source does not belong to this workspace")
+            total_bytes += int(version["byte_size"])
+            total_pages += int(version["page_count"])
+            if total_bytes > self.settings.merge_max_total_bytes:
+                raise DocumentTooLargeError(
+                    "merge exceeds the "
+                    f"{self.settings.merge_max_total_bytes}-byte source limit"
+                )
+            if total_pages > self.settings.merge_max_pages:
+                raise DocumentTooLargeError(
+                    f"merge exceeds the {self.settings.merge_max_pages}-page limit"
+                )
+            versions.append(version)
+            source_paths.append(self.storage.blob_path(version["content_sha256"]))
+
+        materialized = self.engine.merge(source_paths)
+        _, digest, byte_size = self.storage.store_bytes(materialized.pdf_bytes)
+        document, version = self.repository.create_document(
+            workspace_id=workspace_id,
+            title=Path(title).name or "Merged document.pdf",
+            digest=digest,
+            byte_size=byte_size,
+            page_count=materialized.page_count,
+            reason="merge",
+            source_version_ids=[item["id"] for item in versions],
+        )
+        return {
+            "document": document,
+            "version": version,
+            "source_version_ids": [item["id"] for item in versions],
+            "byte_reproducible": materialized.byte_reproducible,
+            "semantic_sha256": materialized.semantic_sha256,
+        }
 
     def apply_command(
         self,

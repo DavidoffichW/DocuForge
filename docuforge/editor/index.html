@@ -98,6 +98,18 @@
         </section>
         <section id="documents-panel" class="panel-body" role="tabpanel" hidden>
           <div class="library-actions"><button id="refresh-documents" class="icon-button" aria-label="Refresh document library" data-tooltip="Refresh library"><svg class="icon"><use href="#icon-refresh"/></svg></button></div>
+          <section class="merge-builder" aria-labelledby="merge-heading">
+            <h2 id="merge-heading">Merge PDFs</h2>
+            <p>Import local PDFs or add saved documents, then arrange them in output order.</p>
+            <input id="merge-files" type="file" accept="application/pdf,.pdf" multiple aria-label="Import PDFs for merge">
+            <div class="merge-picker">
+              <select id="merge-document-select" aria-label="Saved document to add"></select>
+              <button id="merge-add-document" type="button">Add</button>
+            </div>
+            <ol id="merge-queue" class="merge-queue" aria-label="PDF merge order"></ol>
+            <label class="merge-title">Output name<input id="merge-title" value="Merged document.pdf" maxlength="180"></label>
+            <button id="merge-documents" class="merge-primary" type="button" disabled>Merge PDFs</button>
+          </section>
           <div id="document-list" class="document-list"></div>
         </section>
       </aside>
@@ -137,6 +149,7 @@
           <h2 id="batch-tables-heading">Batch PDFs</h2>
           <p class="etl-help">Upload several PDFs. Each file is isolated, bounded, and reported in one ZIP.</p>
           <input id="batch-files" type="file" accept="application/pdf,.pdf" multiple>
+          <label class="batch-folder">Or choose a folder<input id="batch-folder" type="file" accept="application/pdf,.pdf" multiple webkitdirectory directory></label>
           <div class="batch-controls">
             <label>Page<input id="batch-page" type="number" min="1" value="1"></label>
             <label>Table<input id="batch-table" type="number" min="1" value="1"></label>

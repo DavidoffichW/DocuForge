@@ -10,6 +10,9 @@ DEFAULT_ETL_MAX_FILE_BYTES = 50 * 1024 * 1024
 DEFAULT_ETL_MAX_TOTAL_BYTES = 250 * 1024 * 1024
 DEFAULT_ETL_MAX_FILES = 100
 DEFAULT_ETL_MAX_PAGES = 2_000
+DEFAULT_MERGE_MAX_FILES = 50
+DEFAULT_MERGE_MAX_TOTAL_BYTES = 512 * 1024 * 1024
+DEFAULT_MERGE_MAX_PAGES = 5_000
 
 
 @dataclass(frozen=True)
@@ -21,6 +24,9 @@ class Settings:
     etl_max_total_bytes: int = DEFAULT_ETL_MAX_TOTAL_BYTES
     etl_max_files: int = DEFAULT_ETL_MAX_FILES
     etl_max_pages: int = DEFAULT_ETL_MAX_PAGES
+    merge_max_files: int = DEFAULT_MERGE_MAX_FILES
+    merge_max_total_bytes: int = DEFAULT_MERGE_MAX_TOTAL_BYTES
+    merge_max_pages: int = DEFAULT_MERGE_MAX_PAGES
 
     @classmethod
     def from_environment(cls, workspace_root: Path | None = None) -> Settings:
@@ -43,7 +49,18 @@ class Settings:
             "etl_max_pages": int(
                 os.environ.get("DOCUFORGE_ETL_MAX_PAGES", DEFAULT_ETL_MAX_PAGES)
             ),
+            "merge_max_files": int(
+                os.environ.get("DOCUFORGE_MERGE_MAX_FILES", DEFAULT_MERGE_MAX_FILES)
+            ),
+            "merge_max_total_bytes": int(
+                os.environ.get(
+                    "DOCUFORGE_MERGE_MAX_TOTAL_BYTES", DEFAULT_MERGE_MAX_TOTAL_BYTES
+                )
+            ),
+            "merge_max_pages": int(
+                os.environ.get("DOCUFORGE_MERGE_MAX_PAGES", DEFAULT_MERGE_MAX_PAGES)
+            ),
         }
         if any(value <= 0 for value in values.values()):
-            raise ValueError("DocuForge ETL limits must be positive")
+            raise ValueError("DocuForge ETL and merge limits must be positive")
         return cls(workspace_root=selected.resolve(), max_upload_bytes=max_upload, **values)

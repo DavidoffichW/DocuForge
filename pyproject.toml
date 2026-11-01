@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "docuforge"
 version = "0.2.0"
-description = "Local-first PDF viewing and page-organization workspace"
+description = "Local-first PDF workspace for page operations, faithful merging, and table extraction"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

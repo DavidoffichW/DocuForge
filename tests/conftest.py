@@ -20,6 +20,7 @@ def build_pdf(
     *,
     pages: int = 3,
     title: str = "Synthetic fixture",
+    label: str = "Fixture",
     interactive: bool = False,
 ) -> bytes:
     output = io.BytesIO()
@@ -34,7 +35,7 @@ def build_pdf(
         pdf.bookmarkPage(f"page-{page_number}")
         pdf.addOutlineEntry(f"Section {page_number}", f"page-{page_number}", level=0)
         pdf.setFont("Helvetica", 14)
-        pdf.drawString(72, 720, f"Fixture page {page_number}")
+        pdf.drawString(72, 720, f"{label} page {page_number}")
         pdf.drawImage(fixture_image, 500, 700, width=24, height=24)
         if interactive and index == 0:
             pdf.linkURL("https://example.invalid/docuforge", (72, 680, 260, 700), relative=0)

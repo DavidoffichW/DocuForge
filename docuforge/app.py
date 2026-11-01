@@ -92,6 +92,11 @@ class ExtractRequest(RevisionRequest):
     page_ids: list[str] = Field(min_length=1)
 
 
+class MergeRequest(BaseModel):
+    title: str = Field(default="Merged document.pdf", max_length=180)
+    version_ids: list[str] = Field(min_length=2, max_length=50)
+
+
 class TableSelectionRequest(BaseModel):
     candidate_id: str = Field(min_length=1, max_length=80)
     mode: str = "table"
@@ -224,6 +229,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "editor": True,
                 "ocr": False,
                 "table_processing": True,
+                "document_merge": True,
                 "table_providers": ["pdfplumber", "text-grid"],
                 "pdf_engine": "pikepdf",
                 "pikepdf_version": pikepdf.__version__,
@@ -256,10 +262,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             stream=file.file,
         )
 
+    @app.post("/api/workspaces/{workspace_id}/documents/merge")
+    def merge_documents(workspace_id: str, payload: MergeRequest) -> dict[str, Any]:
+        return manager.merge_versions(
+            workspace_id=workspace_id,
+            title=payload.title,
+            version_ids=payload.version_ids,
+        )
+
     @app.get("/api/documents/{document_id}")
     def get_document(document_id: str) -> dict[str, Any]:
         document = repository.get_document(document_id)
         document["versions"] = repository.list_versions(document_id)
+        document["sources"] = repository.list_document_sources(document_id)
         return document
 
     @app.post("/api/documents/{document_id}/sessions")

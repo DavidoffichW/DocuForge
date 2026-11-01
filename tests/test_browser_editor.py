@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import socket
 import threading
 import time
@@ -349,3 +350,47 @@ def test_browser_table_detection_export_and_batch_isolation(
         report = archive.read("batch_report.json").decode("utf-8")
         assert '"success_count":1' in report
         assert '"failure_count":1' in report
+
+
+@pytest.mark.browser
+def test_browser_imports_orders_merges_and_reopens_documents(
+    browser,
+    live_editor: str,
+    pdf_bytes: bytes,
+    table_pdf_bytes: bytes,
+) -> None:
+    page = browser.new_page(viewport={"width": 1440, "height": 900})
+    page.goto(live_editor)
+    page.locator(".tab[data-panel='documents-panel']").click()
+    page.locator("#merge-files").set_input_files(
+        [
+            {
+                "name": "fixture.pdf",
+                "mimeType": "application/pdf",
+                "buffer": pdf_bytes,
+            },
+            {
+                "name": "tables.pdf",
+                "mimeType": "application/pdf",
+                "buffer": table_pdf_bytes,
+            },
+        ]
+    )
+    expect(page.locator("#merge-queue li")).to_have_count(2, timeout=15_000)
+    page.locator("#merge-queue li").nth(1).get_by_role("button", name="Move up").click()
+    expect(page.locator("#merge-queue li").first).to_contain_text("tables.pdf")
+    page.locator("#merge-title").fill("research-bundle.pdf")
+    page.locator("#merge-documents").click()
+
+    expect(page.locator("#document-title")).to_have_text("research-bundle.pdf", timeout=20_000)
+    expect(page.locator("#viewer .page")).to_have_count(4, timeout=20_000)
+    expect(page.locator("#viewer .page").first.locator(".textLayer")).to_contain_text("Name")
+    expect(page.locator("#viewer .page").nth(1).locator(".textLayer")).to_contain_text(
+        "Fixture page 1"
+    )
+
+    page.reload()
+    page.locator(".tab[data-panel='documents-panel']").click()
+    expect(page.locator(".document-card")).to_have_count(3)
+    page.get_by_role("button", name=re.compile("research-bundle.pdf")).click()
+    expect(page.locator("#viewer .page")).to_have_count(4, timeout=20_000)

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pikepdf
 from fastapi.testclient import TestClient
+from pypdf import PdfReader
 
 from docuforge.app import create_app
 from docuforge.config import Settings
@@ -88,6 +89,91 @@ def test_api_errors_are_controlled_and_do_not_leak_paths(tmp_path: Path) -> None
         assert response.json()["code"] == "invalid_document"
         assert str(tmp_path) not in response.text
 
+
+def test_api_merges_managed_versions_in_requested_order(
+    tmp_path: Path,
+    pdf_bytes: bytes,
+    table_pdf_bytes: bytes,
+) -> None:
+    app = create_app(Settings(workspace_root=tmp_path / "managed"))
+    with TestClient(app, base_url="http://127.0.0.1", headers=LOCAL_API_HEADERS) as client:
+        first = client.post(
+            "/api/workspaces/default/documents",
+            files={"file": ("fixture.pdf", pdf_bytes, "application/pdf")},
+            data={"title": "fixture.pdf"},
+        ).json()
+        second = client.post(
+            "/api/workspaces/default/documents",
+            files={"file": ("tables.pdf", table_pdf_bytes, "application/pdf")},
+            data={"title": "tables.pdf"},
+        ).json()
+
+        merged = client.post(
+            "/api/workspaces/default/documents/merge",
+            json={
+                "title": "combined.pdf",
+                "version_ids": [second["version"]["id"], first["version"]["id"]],
+            },
+        )
+        assert merged.status_code == 200
+        result = merged.json()
+        assert result["version"]["reason"] == "merge"
+        assert result["version"]["page_count"] == 4
+        assert result["source_version_ids"] == [
+            second["version"]["id"],
+            first["version"]["id"],
+        ]
+
+        content = client.get(f"/api/versions/{result['version']['id']}/content").content
+        reader = PdfReader(BytesIO(content))
+        assert "Name" in (reader.pages[0].extract_text() or "")
+        assert "Fixture page 1" in (reader.pages[1].extract_text() or "")
+        document = client.get(f"/api/documents/{result['document']['id']}").json()
+        assert [source["source_version_id"] for source in document["sources"]] == result[
+            "source_version_ids"
+        ]
+        assert len(client.get("/api/workspaces/default/documents").json()) == 3
+
+
+def test_merge_bounds_and_workspace_membership_fail_without_new_document(
+    tmp_path: Path,
+    pdf_bytes: bytes,
+) -> None:
+    app = create_app(
+        Settings(workspace_root=tmp_path / "managed", merge_max_pages=3)
+    )
+    with TestClient(app, base_url="http://127.0.0.1", headers=LOCAL_API_HEADERS) as client:
+        first = client.post(
+            "/api/workspaces/default/documents",
+            files={"file": ("first.pdf", pdf_bytes, "application/pdf")},
+            data={"title": "first.pdf"},
+        ).json()
+        other_workspace = client.post("/api/workspaces", json={"name": "Other"}).json()
+        second = client.post(
+            f"/api/workspaces/{other_workspace['id']}/documents",
+            files={"file": ("second.pdf", pdf_bytes, "application/pdf")},
+            data={"title": "second.pdf"},
+        ).json()
+
+        cross_workspace = client.post(
+            "/api/workspaces/default/documents/merge",
+            json={
+                "title": "blocked.pdf",
+                "version_ids": [first["version"]["id"], second["version"]["id"]],
+            },
+        )
+        assert cross_workspace.status_code == 400
+        assert len(client.get("/api/workspaces/default/documents").json()) == 1
+
+        page_bound = client.post(
+            "/api/workspaces/default/documents/merge",
+            json={
+                "title": "too-large.pdf",
+                "version_ids": [first["version"]["id"], first["version"]["id"]],
+            },
+        )
+        assert page_bound.status_code == 413
+        assert len(client.get("/api/workspaces/default/documents").json()) == 1
 
 def test_editor_and_health_are_served_by_same_application(tmp_path: Path) -> None:
     app = create_app(Settings(workspace_root=tmp_path / "managed"))

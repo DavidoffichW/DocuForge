@@ -160,6 +160,22 @@ button:disabled { transform: none; }
 .document-card > span { min-width: 0; }
 .document-card strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .document-card small { display: block; margin-top: 2px; color: var(--muted); }
+.merge-builder { margin: 0 0 10px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--chrome); }
+.merge-builder h2 { margin: 0 0 4px; font-size: 13px; }
+.merge-builder > p { margin: 0 0 8px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+#merge-files { width: 100%; margin-bottom: 7px; padding: 6px; border: 1px dashed var(--border-strong); border-radius: var(--radius); color: var(--muted); font-size: 10px; }
+.merge-picker { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px; }
+.merge-picker select { min-width: 0; }
+.merge-queue { display: grid; gap: 5px; margin: 8px 0; padding: 0; list-style: none; }
+.merge-queue:empty::before { content: "No merge sources selected"; color: var(--muted); font-size: 10px; }
+.merge-queue li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px; padding: 5px 6px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 10px; }
+.merge-queue li > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.merge-order-controls { display: flex; gap: 2px; }
+.merge-order-controls button { min-width: 25px; padding: 3px 5px; }
+.merge-title { display: grid; gap: 3px; margin-bottom: 7px; color: var(--muted); font-size: 10px; }
+.merge-title input { width: 100%; }
+.merge-primary { width: 100%; border-color: var(--ruby-hover); color: #fff; background: var(--ruby); }
+.merge-primary:hover:not(:disabled) { background: var(--ruby-hover); }
 
 .viewer-region { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--canvas); }
 .etl-panel { min-width: 0; overflow: auto; border-left: 1px solid var(--border); background: var(--surface); scrollbar-color: var(--border-strong) transparent; animation: etl-panel-in var(--motion-panel) ease-out; }
@@ -188,7 +204,8 @@ button:disabled { transform: none; }
 .slice-controls select, .slice-controls input, .batch-controls input { width: 100%; padding: 5px 7px; }
 .export-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .export-actions button { padding-inline: 4px; font-size: 10px; }
-#batch-files { width: 100%; margin: 0 0 7px; padding: 6px; border: 1px dashed var(--border-strong); border-radius: var(--radius); color: var(--muted); background: var(--chrome); font-size: 10px; }
+#batch-files, #batch-folder { width: 100%; margin: 0 0 7px; padding: 6px; border: 1px dashed var(--border-strong); border-radius: var(--radius); color: var(--muted); background: var(--chrome); font-size: 10px; }
+.batch-folder { display: grid; gap: 3px; color: var(--muted); font-size: 10px; }
 .viewer-container { position: absolute; inset: 0; overflow: auto; scrollbar-color: var(--border-strong) transparent; }
 .pdfViewer { padding: 22px 0 48px; }
 .pdfViewer .page { margin: 0 auto 16px; border: 0; box-shadow: var(--shadow-paper); }

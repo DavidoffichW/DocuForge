@@ -28,6 +28,8 @@ const state = {
   mutationQueue: Promise.resolve(),
   draggedPageId: null,
   tableCandidates: [],
+  documents: [],
+  mergeSources: [],
 };
 
 const eventBus = new EventBus();
@@ -79,14 +81,18 @@ async function api(path, options = {}) {
   return type.includes("application/json") ? response.json() : response;
 }
 
+async function importManagedFile(file) {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  form.append("title", file.name);
+  return api(`/api/workspaces/${state.workspaceId}/documents`, { method: "POST", body: form });
+}
+
 async function openFile(file) {
   if (!file) return;
   busy(true, "Validating and importing PDF…");
   try {
-    const form = new FormData();
-    form.append("file", file, file.name);
-    form.append("title", file.name);
-    const imported = await api(`/api/workspaces/${state.workspaceId}/documents`, { method: "POST", body: form });
+    const imported = await importManagedFile(file);
     await openDocument(imported.document.id, imported.version.id);
     status(`Imported ${imported.pdf.page_count} pages`);
     await refreshDocuments();
@@ -493,6 +499,7 @@ function confirmDelete() {
 async function refreshDocuments() {
   try {
     const documents = await api(`/api/workspaces/${state.workspaceId}/documents`);
+    state.documents = documents;
     const list = $("#document-list");
     list.replaceChildren();
     for (const document of documents) {
@@ -504,7 +511,120 @@ async function refreshDocuments() {
       card.addEventListener("click", () => openDocument(document.id, document.latest_version_id));
       list.append(card);
     }
+    refreshMergePicker();
   } catch (error) { toast(error.message, "error"); }
+}
+
+function refreshMergePicker() {
+  const picker = $("#merge-document-select");
+  picker.replaceChildren();
+  for (const document of state.documents) {
+    const option = window.document.createElement("option");
+    option.value = document.latest_version_id;
+    option.textContent = `${document.title} · ${document.page_count} pages`;
+    picker.append(option);
+  }
+  $("#merge-add-document").disabled = !state.documents.length;
+  renderMergeQueue();
+}
+
+function renderMergeQueue() {
+  const list = $("#merge-queue");
+  list.replaceChildren();
+  state.mergeSources.forEach((source, index) => {
+    const item = window.document.createElement("li");
+    const label = window.document.createElement("span");
+    label.textContent = `${source.title} · ${source.pageCount} pages`;
+    const controls = window.document.createElement("span");
+    controls.className = "merge-order-controls";
+    for (const [text, delta, action] of [["↑", -1, "Move up"], ["↓", 1, "Move down"]]) {
+      const button = window.document.createElement("button");
+      button.type = "button";
+      button.textContent = text;
+      button.setAttribute("aria-label", `${action} ${source.title}`);
+      button.disabled = index + delta < 0 || index + delta >= state.mergeSources.length;
+      button.addEventListener("click", () => {
+        const next = index + delta;
+        [state.mergeSources[index], state.mergeSources[next]] = [state.mergeSources[next], state.mergeSources[index]];
+        renderMergeQueue();
+      });
+      controls.append(button);
+    }
+    const remove = window.document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", `Remove ${source.title} from merge`);
+    remove.addEventListener("click", () => {
+      state.mergeSources.splice(index, 1);
+      renderMergeQueue();
+    });
+    controls.append(remove);
+    item.append(label, controls);
+    list.append(item);
+  });
+  $("#merge-documents").disabled = state.mergeSources.length < 2;
+}
+
+function addMergeSource(source) {
+  state.mergeSources.push(source);
+  renderMergeQueue();
+}
+
+function addSelectedMergeDocument() {
+  const versionId = $("#merge-document-select").value;
+  const document = state.documents.find((item) => item.latest_version_id === versionId);
+  if (!document) return;
+  addMergeSource({
+    versionId,
+    title: document.title,
+    pageCount: document.page_count,
+  });
+}
+
+async function importMergeFiles(files) {
+  if (!files.length) return;
+  busy(true, `Importing ${files.length} PDF${files.length === 1 ? "" : "s"}…`);
+  try {
+    for (const file of files) {
+      const imported = await importManagedFile(file);
+      addMergeSource({
+        versionId: imported.version.id,
+        title: imported.document.title,
+        pageCount: imported.version.page_count,
+      });
+    }
+    await refreshDocuments();
+    status(`Imported ${files.length} merge source${files.length === 1 ? "" : "s"}`);
+  } catch (error) {
+    toast(error.message, "error");
+    status("Merge-source import failed");
+  } finally {
+    busy(false);
+    $("#merge-files").value = "";
+  }
+}
+
+async function mergeDocuments() {
+  if (state.mergeSources.length < 2) return;
+  busy(true, `Merging ${state.mergeSources.length} PDFs…`);
+  try {
+    const result = await api(`/api/workspaces/${state.workspaceId}/documents/merge`, {
+      method: "POST",
+      body: JSON.stringify({
+        title: $("#merge-title").value || "Merged document.pdf",
+        version_ids: state.mergeSources.map((source) => source.versionId),
+      }),
+    });
+    state.mergeSources = [];
+    renderMergeQueue();
+    await refreshDocuments();
+    await openDocument(result.document.id, result.version.id);
+    status(`Merged ${result.source_version_ids.length} PDFs into ${result.version.page_count} pages`);
+    toast("Merged document created", "success");
+  } catch (error) {
+    toast(error.message, "error");
+    status("Merge failed · source documents were not changed");
+  } finally { busy(false); }
 }
 
 function resetTableTools() {
@@ -639,7 +759,7 @@ function updateSliceFields() {
 }
 
 async function exportBatchTables() {
-  const files = [...$("#batch-files").files];
+  const files = [...$("#batch-files").files, ...$("#batch-folder").files];
   if (!files.length) {
     toast("Choose one or more PDFs for the batch", "error");
     return;
@@ -659,6 +779,7 @@ async function exportBatchTables() {
     status(`Batch complete · ${success} succeeded · ${failure} failed`);
     toast(`Batch ready · ${success} succeeded · ${failure} failed`, failure === "0" ? "success" : "info");
     $("#batch-files").value = "";
+    $("#batch-folder").value = "";
   } catch (error) { toast(error.message, "error"); status("Batch export failed"); }
   finally { busy(false); }
 }
@@ -716,6 +837,9 @@ $("#delete-pages").addEventListener("click", async () => {
 });
 $("#extract-pages").addEventListener("click", extractSelected);
 $("#refresh-documents").addEventListener("click", refreshDocuments);
+$("#merge-files").addEventListener("change", (event) => importMergeFiles([...event.target.files]));
+$("#merge-add-document").addEventListener("click", addSelectedMergeDocument);
+$("#merge-documents").addEventListener("click", mergeDocuments);
 function setTablePanel(open) {
   $("#etl-panel").hidden = !open;
   $(".workspace-shell").classList.toggle("etl-open", open);
