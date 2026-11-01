@@ -1,12 +1,14 @@
 # DocuForge
 
-> A local PDF workspace for organizing documents, preserving versions, and extracting tables.
+> PDFs are messy enough. Edit pages, merge files, and pull tables without
+> touching the originals.
 
-DocuForge gives you one place to inspect PDFs, organize their pages, combine
-documents, and turn detected tables into structured files. It runs on your
-machine and does not send documents to a hosted service.
+DocuForge handles the PDF chores that usually send you hunting through three
+different apps: rearranging pages, combining files, and getting tables back
+out. It runs on your machine, keeps every imported PDF unchanged, and saves
+your edits as new versions.
 
-## What it does
+## The useful bits
 
 - View PDFs with search, text selection, links, zoom, and page thumbnails
 - Reorder, rotate, delete, and extract pages
@@ -20,7 +22,7 @@ machine and does not send documents to a hosted service.
 
 The original PDF is never overwritten.
 
-## Install
+## Get it running
 
 DocuForge requires Python 3.11 or newer and a current desktop browser.
 
@@ -57,7 +59,7 @@ python -m docuforge --workspace /path/to/workspace
 
 You can also set the `DOCUFORGE_WORKSPACE` environment variable.
 
-## Using it
+## A quick tour
 
 Open a PDF, then use the page rail to select and arrange pages. Changes appear
 in the main viewer immediately, but the imported file stays untouched until
@@ -95,10 +97,11 @@ bytes, and 5,000 pages by default.
 Normal document uploads are limited to 256 MiB by default. Table extraction is
 text-based; scanned image-only pages need OCR, which DocuForge does not provide.
 
-## PDF fidelity
+## PDFs have baggage
 
-PDFs can contain more than pages and text. They may also have links, bookmarks,
-forms, annotations, named destinations, and document-level references.
+PDFs contain more than pages and text. Links, bookmarks, forms, annotations,
+named destinations, and document-level references all have to survive a page
+operation too.
 
 DocuForge checks the structures it knows how to preserve before accepting a
 saved result. If an operation would leave a dangling link or lose supported
@@ -107,7 +110,7 @@ interactive content, it fails instead of quietly producing a damaged PDF.
 This is deliberately conservative. It does not mean every PDF feature is
 supported or that every document can be transformed.
 
-## Local by design
+## Stays on your machine
 
 DocuForge is a single-user desktop-style app served from a local FastAPI
 process. It only binds to loopback addresses and rejects non-local hosts and
@@ -116,7 +119,7 @@ cross-origin browser mutations.
 It has no accounts or remote-access security model. Do not expose it to a
 network or run it as a shared server.
 
-## Not supported
+## What it doesn't pretend to do
 
 - Creating highlights, comments, drawings, or other annotations
 - OCR for scanned documents
@@ -126,7 +129,7 @@ network or run it as a shared server.
 
 DocuForge is a page editor, not a full PDF authoring suite.
 
-## How it works
+## Under the hood
 
 - [FastAPI](https://fastapi.tiangolo.com/) serves the editor and local API
 - [PDF.js](https://mozilla.github.io/pdf.js/) renders documents in the browser
