@@ -110,6 +110,11 @@ interactive content, it fails instead of quietly producing a damaged PDF.
 This is deliberately conservative. It does not mean every PDF feature is
 supported or that every document can be transformed.
 
+That is a fidelity-versus-coverage trade-off: a transformation that cannot
+preserve the supported document structures is rejected rather than guessed
+through. Table extraction likewise uses text and geometry, not OCR or
+model-generated reconstruction of unreadable content.
+
 ## Stays on your machine
 
 DocuForge is a single-user desktop-style app served from a local FastAPI
